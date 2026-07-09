@@ -208,7 +208,24 @@ void AAWProxy::handleClient(int server_sock) {
     BluetoothHandler::instance().stopConnectWithRetry();
 
     if (Config::instance()->getConnectionStrategy() != ConnectionStrategy::USB_FIRST) {
-        if (!UsbManager::instance().enableDefaultAndWaitForAccessory(std::chrono::seconds(30))) {
+        // Some head units do not re-issue the accessory-start request on a warm
+        // reconnect (car still on, cable still plugged) when the USB device just
+        // reappears — they believe they are already in accessory mode. The old
+        // behaviour waited out a single 30s timeout and then dropped the phone's
+        // already-established TCP session, which is why users had to physically
+        // unplug/replug the USB cable (issues #344, #337). Instead, force a fresh
+        // USB re-enumeration between attempts to nudge the head unit into
+        // re-requesting accessory mode, without tearing down the phone session.
+        bool accessoryReady = false;
+        for (int attempt = 0; attempt < 2 && !accessoryReady; attempt++) {
+            if (attempt > 0) {
+                Logger::instance()->info("No accessory start yet, forcing USB re-enumeration and retrying\n");
+                UsbManager::instance().disableGadget();
+                std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            }
+            accessoryReady = UsbManager::instance().enableDefaultAndWaitForAccessory(std::chrono::seconds(15));
+        }
+        if (!accessoryReady) {
             close(m_tcp_fd);
             m_tcp_fd = -1;
             return;

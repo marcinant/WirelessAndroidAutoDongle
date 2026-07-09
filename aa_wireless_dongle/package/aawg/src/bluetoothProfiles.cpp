@@ -62,14 +62,7 @@ public:
 
         SendMessage(MessageId::WifiStartRequest, &wifiStartRequest);
 
-        MessageId messageId = ReadMessage();
-
-        if (messageId != MessageId::WifiInfoRequest) {
-            Logger::instance()->info("Expected WifiInfoRequest, got %s (%d). Abort.\n", MessageName(messageId).c_str(), static_cast<int>(messageId));
-            return;
-        }
-
-        Logger::instance()->info("Sending WifiInfoResponse (ssid: %s, bssid: %s)\n", wifiInfo.ssid.c_str(), wifiInfo.bssid.c_str());
+        // Build the credentials response once; sent below when appropriate.
         WifiInfoResponse wifiInfoResponse;
         wifiInfoResponse.set_ssid(wifiInfo.ssid);
         wifiInfoResponse.set_key(wifiInfo.key);
@@ -77,10 +70,48 @@ public:
         wifiInfoResponse.set_security_mode(wifiInfo.securityMode);
         wifiInfoResponse.set_access_point_type(wifiInfo.accessPointType);
 
-        SendMessage(MessageId::WifiInfoResponse, &wifiInfoResponse);
+        // Drive the handshake tolerantly instead of demanding an exact message
+        // order. Phones differ: some ask for wifi info (WifiInfoRequest) before
+        // starting, some cache credentials and jump straight to WifiStartResponse,
+        // some interleave WifiVersionRequest. The previous code aborted on the
+        // first message that was not WifiInfoRequest, which killed those phones.
+        //
+        // Rules:
+        //   - Send the credentials (WifiInfoResponse) exactly once, either when
+        //     the phone asks or, if it never asks, as soon as it moves on — the
+        //     phone needs them to join the AP.
+        //   - Finish once the credentials are out and the phone acknowledges the
+        //     start (WifiStartResponse / WifiConnectStatus).
+        //   - Ignore any other id and keep reading.
+        // The loop is bounded (each read is also bounded by the 10s SO_RCVTIMEO)
+        // so a misbehaving phone cannot wedge this thread.
+        bool sentWifiInfo = false;
+        for (int attempts = 0; attempts < 8; attempts++) {
+            MessageId messageId = ReadMessage();
 
-        ReadMessage();
-        ReadMessage();
+            if (messageId == MessageId::Invalid) {
+                Logger::instance()->info("Wifi handshake read failed or timed out. Abort.\n");
+                return;
+            }
+
+            const bool phoneMovingOn = (messageId == MessageId::WifiStartResponse || messageId == MessageId::WifiConnectStatus);
+
+            if (!sentWifiInfo && (messageId == MessageId::WifiInfoRequest || phoneMovingOn)) {
+                if (phoneMovingOn) {
+                    Logger::instance()->info("Phone proceeded without WifiInfoRequest, sending WifiInfoResponse proactively\n");
+                }
+                Logger::instance()->info("Sending WifiInfoResponse (ssid: %s, bssid: %s)\n", wifiInfo.ssid.c_str(), wifiInfo.bssid.c_str());
+                SendMessage(MessageId::WifiInfoResponse, &wifiInfoResponse);
+                sentWifiInfo = true;
+            }
+
+            if (sentWifiInfo && phoneMovingOn) {
+                Logger::instance()->info("Wifi handshake complete\n");
+                return;
+            }
+        }
+
+        Logger::instance()->info("Wifi handshake did not complete within message budget\n");
     }
 
 private:
