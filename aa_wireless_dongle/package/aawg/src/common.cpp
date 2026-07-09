@@ -67,26 +67,23 @@ WifiInfo Config::getWifiInfo() {
 }
 
 ConnectionStrategy Config::getConnectionStrategy() {
-    if (!connectionStrategy.has_value()) {
+    // Function-local static: C++11 guarantees its initialization is thread-safe
+    // and happens exactly once, even if several threads race the first call.
+    static const ConnectionStrategy strategy = [this]() {
         const int32_t connectionStrategyEnv = getenv("AAWG_CONNECTION_STRATEGY", 1);
 
         switch (connectionStrategyEnv) {
             case 0:
-                connectionStrategy = ConnectionStrategy::DONGLE_MODE;
-                break;
-            case 1:
-                connectionStrategy = ConnectionStrategy::PHONE_FIRST;
-                break;
+                return ConnectionStrategy::DONGLE_MODE;
             case 2:
-                connectionStrategy = ConnectionStrategy::USB_FIRST;
-                break;
+                return ConnectionStrategy::USB_FIRST;
+            case 1:
             default:
-                connectionStrategy = ConnectionStrategy::PHONE_FIRST;
-                break;
+                return ConnectionStrategy::PHONE_FIRST;
         }
-    }
+    }();
 
-    return connectionStrategy.value();
+    return strategy;
 }
 #pragma endregion Config
 

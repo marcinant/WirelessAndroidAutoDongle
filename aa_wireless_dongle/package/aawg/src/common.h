@@ -38,15 +38,15 @@ private:
     std::string getenv(std::string name, std::string defaultValue);
 
     std::string getMacAddress(std::string interface);
-
-    std::optional<ConnectionStrategy> connectionStrategy;
 };
 
 class Logger {
 public:
     static Logger* instance();
 
-    void info(const char *format, ...);
+    // format(printf, 2, 3): implicit `this` is arg 1, so the format string is
+    // arg 2 and the varargs start at arg 3. Lets the compiler catch mismatches.
+    void info(const char *format, ...) __attribute__((format(printf, 2, 3)));
 private:
     Logger();
     ~Logger();

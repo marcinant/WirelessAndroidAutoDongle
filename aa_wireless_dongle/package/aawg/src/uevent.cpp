@@ -93,12 +93,14 @@ std::optional<std::thread> UeventMonitor::start() {
 
     if (bind(nl_sock, (struct sockaddr*)&address, sizeof(address)) < 0) {
         Logger::instance()->info("bind failed for netlink socket: %s\n", strerror(errno));
+        close(nl_sock);
         return std::nullopt;
     }
 
     int opt = 1;
     if (setsockopt(nl_sock, SOL_SOCKET, SO_PASSCRED, &opt, sizeof(opt))) {
         Logger::instance()->info("setsockopt failed to set SO_PASSCRED for netlink socket: %s\n", strerror(errno));
+        close(nl_sock);
         return std::nullopt;
     }
 

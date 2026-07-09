@@ -58,7 +58,12 @@ void UsbManager::writeGadgetFile(std::string gadgetName, std::string relativeFil
     }
     fputs(content, gadgetFile);
     fputc('\n', gadgetFile);
-    fclose(gadgetFile);
+    // configfs writes (e.g. binding the UDC) can fail at flush/close time; the
+    // error surfaces via ferror or the fclose return, so check both and log.
+    bool writeError = ferror(gadgetFile) != 0;
+    if (fclose(gadgetFile) != 0 || writeError) {
+        Logger::instance()->info("USB Manager: Error writing gadget file %s: %s\n", gadgetFilePath.c_str(), strerror(errno));
+    }
 }
 
 void UsbManager::enableGadget(std::string gadgetName) {

@@ -3,8 +3,11 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <arpa/inet.h>
+#include <sys/socket.h>
+#include <sys/time.h>
 #include <vector>
 #include <cstring>
+#include <cerrno>
 
 #include "common.h"
 #include "bluetoothHandler.h"
@@ -40,6 +43,16 @@ public:
             Logger::instance()->info("Error making fd blocking: %s\n", strerror(errno));
         }
 
+        // Bound each blocking read so a phone that stalls mid-handshake cannot
+        // wedge this thread forever (the RFCOMM fd has no timeout otherwise).
+        struct timeval tv = {
+            .tv_sec = 10,
+            .tv_usec = 0,
+        };
+        if (setsockopt(m_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+            Logger::instance()->info("Error setting RFCOMM read timeout: %s\n", strerror(errno));
+        }
+
         WifiInfo wifiInfo = Config::instance()->getWifiInfo();
 
         Logger::instance()->info("Sending WifiStartRequest (ip: %s, port: %d)\n", wifiInfo.ipAddress.c_str(), wifiInfo.port);
@@ -52,7 +65,7 @@ public:
         MessageId messageId = ReadMessage();
 
         if (messageId != MessageId::WifiInfoRequest) {
-            Logger::instance()->info("Expected WifiInfoRequest, got %s (%d). Abort.\n", MessageName(messageId), messageId);
+            Logger::instance()->info("Expected WifiInfoRequest, got %s (%d). Abort.\n", MessageName(messageId).c_str(), static_cast<int>(messageId));
             return;
         }
 
@@ -132,10 +145,10 @@ private:
         message->SerializeToArray(buffer.data() + 4, messageSize);
 
         if (!writeFully(buffer.data(), length)) {
-            Logger::instance()->info("Error sending %s, messageId: %d\n", MessageName(messageId).c_str(), messageId);
+            Logger::instance()->info("Error sending %s, messageId: %d\n", MessageName(messageId).c_str(), static_cast<int>(messageId));
         }
         else {
-            Logger::instance()->info("Sent %s, messageId: %d, wrote %d bytes\n", MessageName(messageId).c_str(), messageId, length);
+            Logger::instance()->info("Sent %s, messageId: %d, wrote %d bytes\n", MessageName(messageId).c_str(), static_cast<int>(messageId), length);
         }
     }
 
@@ -168,7 +181,7 @@ private:
         }
         MessageId messageId = static_cast<MessageId>(ntohs(networkShort));
 
-        Logger::instance()->info("Read %s. length: %d, messageId: %d\n", MessageName(messageId).c_str(), length, messageId);
+        Logger::instance()->info("Read %s. length: %d, messageId: %d\n", MessageName(messageId).c_str(), length, static_cast<int>(messageId));
 
         // Consume the full message body so it does not corrupt the next read.
         std::vector<unsigned char> buffer(length);
@@ -193,8 +206,15 @@ void AAWirelessProfile::NewConnection(DBus::Path path, std::shared_ptr<DBus::Fil
     Logger::instance()->info("AA Wireless NewConnection\n");
     Logger::instance()->info("Path: %s, fd: %d\n", path.c_str(), fd->descriptor());
 
-    AAWirelessLauncher(fd->descriptor()).launch();
-    Logger::instance()->info("Bluetooth launch sequence completed\n");
+    // Run the blocking wifi handshake on a detached worker so this method
+    // returns immediately and never stalls the DBus dispatcher thread (a stalled
+    // dispatcher freezes all other DBus traffic on the connection). Capture the
+    // FileDescriptor shared_ptr so the fd stays open for the worker's lifetime;
+    // it would otherwise be closed when NewConnection returns.
+    std::thread([fd]() {
+        AAWirelessLauncher(fd->descriptor()).launch();
+        Logger::instance()->info("Bluetooth launch sequence completed\n");
+    }).detach();
 }
 
 void AAWirelessProfile::RequestDisconnection(DBus::Path path) {

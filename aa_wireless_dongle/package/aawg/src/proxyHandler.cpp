@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <fcntl.h>
 #include <string.h>
+#include <errno.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/poll.h>
@@ -11,6 +12,7 @@
 #include <optional>
 #include <atomic>
 #include <string>
+#include <vector>
 
 #include "common.h"
 #include "usb.h"
@@ -67,8 +69,12 @@ ssize_t AAWProxy::readMessage(int fd, unsigned char *buffer, size_t buffer_len) 
 }
 
 void AAWProxy::forward(ProxyDirection direction, std::atomic<bool>& should_exit) {
-    constexpr size_t buffer_len = 16384;
-    unsigned char buffer[buffer_len];
+    // Sized to the largest frame the 2-byte length field can express: an 8-byte
+    // extended header plus a 65535-byte payload = 65543. This guarantees a
+    // well-formed frame is never rejected with EMSGSIZE in readMessage().
+    // Heap-allocated (vector) to keep 64 KB off the thread stack.
+    constexpr size_t buffer_len = 65544;
+    std::vector<unsigned char> buffer(buffer_len);
 
     bool read_message;
     int read_fd, write_fd;
@@ -104,7 +110,7 @@ void AAWProxy::forward(ProxyDirection direction, std::atomic<bool>& should_exit)
 
     while (!should_exit) {
         // Read
-        ssize_t len = read_message ? readMessage(read_fd, buffer, buffer_len) : read(read_fd, buffer, buffer_len);
+        ssize_t len = read_message ? readMessage(read_fd, buffer.data(), buffer_len) : read(read_fd, buffer.data(), buffer_len);
 
         if (len <= 0) {
             // Start logging read/write details if there is an error.
@@ -125,8 +131,24 @@ void AAWProxy::forward(ProxyDirection direction, std::atomic<bool>& should_exit)
             break;
         }
 
-        // Write
-        ssize_t wlen = write(write_fd, buffer, len);
+        // Write — loop over partial writes so no bytes are dropped. A short
+        // write can happen if the blocking write() is interrupted (e.g. by the
+        // SIGUSR1 we use to stop forwarding).
+        ssize_t wlen = 0;
+        while (wlen < len) {
+            ssize_t w = write(write_fd, buffer.data() + wlen, len - wlen);
+            if (w < 0) {
+                if (errno == EINTR && !should_exit) {
+                    continue;
+                }
+                wlen = w;
+                break;
+            }
+            if (w == 0) {
+                break;
+            }
+            wlen += w;
+        }
 
         if (wlen <= 0) {
             // Start logging read/write details if there is an error.
@@ -258,6 +280,7 @@ std::optional<std::thread> AAWProxy::startServer(int32_t port) {
     int opt = 1;
     if (setsockopt(server_sock, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
         Logger::instance()->info("setsockopt failed: %s\n", strerror(errno));
+        close(server_sock);
         return std::nullopt;
     }
 
@@ -268,11 +291,13 @@ std::optional<std::thread> AAWProxy::startServer(int32_t port) {
 
     if (bind(server_sock, (struct sockaddr*)&address, sizeof(address)) < 0) {
         Logger::instance()->info("bind failed: %s\n", strerror(errno));
+        close(server_sock);
         return std::nullopt;
     }
 
     if (listen(server_sock, 3) < 0) {
         Logger::instance()->info("listen failed: %s\n", strerror(errno));
+        close(server_sock);
         return std::nullopt;
     }
 

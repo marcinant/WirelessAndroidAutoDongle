@@ -12,6 +12,13 @@ int main(void) {
 
     // Global init
     std::optional<std::thread> ueventThread =  UeventMonitor::instance().start();
+    if (!ueventThread) {
+        // Without the uevent monitor the accessory-start event is never seen,
+        // so the USB gadget can never switch to accessory mode. Fail fast
+        // instead of hanging forever waiting for an accessory that never comes.
+        Logger::instance()->info("Failed to start uevent monitor, aborting\n");
+        return 1;
+    }
     UsbManager::instance().init();
     BluetoothHandler::instance().init();
 
@@ -21,7 +28,7 @@ int main(void) {
     }
 
     while (true) {
-        Logger::instance()->info("Connection Strategy: %d\n", connectionStrategy);
+        Logger::instance()->info("Connection Strategy: %d\n", static_cast<int>(connectionStrategy));
 
         // Per connection setup and processing
         if (connectionStrategy == ConnectionStrategy::USB_FIRST) {
