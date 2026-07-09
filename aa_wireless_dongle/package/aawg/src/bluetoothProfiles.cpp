@@ -3,6 +3,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <arpa/inet.h>
+#include <vector>
+#include <cstring>
 
 #include "common.h"
 #include "bluetoothHandler.h"
@@ -32,7 +34,11 @@ public:
     void launch() {
         // Make fd blocking
         int fd_flags = fcntl(m_fd, F_GETFL);
-        fcntl(m_fd, F_SETFL, fd_flags & ~O_NONBLOCK);
+        if (fd_flags < 0) {
+            Logger::instance()->info("Error getting fd flags: %s\n", strerror(errno));
+        } else if (fcntl(m_fd, F_SETFL, fd_flags & ~O_NONBLOCK) < 0) {
+            Logger::instance()->info("Error making fd blocking: %s\n", strerror(errno));
+        }
 
         WifiInfo wifiInfo = Config::instance()->getWifiInfo();
 
@@ -96,58 +102,80 @@ private:
         }
     }
 
+    // Write exactly length bytes to the fd, looping over partial writes.
+    // Returns false on error.
+    bool writeFully(const unsigned char* buffer, size_t length) {
+        size_t total = 0;
+        while (total < length) {
+            ssize_t wrote = write(m_fd, buffer + total, length - total);
+            if (wrote <= 0) {
+                return false;
+            }
+            total += (size_t)wrote;
+        }
+        return true;
+    }
+
     void SendMessage(MessageId messageId, google::protobuf::MessageLite* message) {
         uint16_t messageSize = (uint16_t)message->ByteSizeLong();
         uint16_t length = messageSize + 4;
 
-        unsigned char* buffer = new unsigned char[length];
+        std::vector<unsigned char> buffer(length);
 
         uint16_t networkShort = 0;
         networkShort = htons(messageSize);
-        memcpy(buffer, &networkShort, sizeof(networkShort));
+        memcpy(buffer.data(), &networkShort, sizeof(networkShort));
 
         networkShort = htons(static_cast<uint16_t>(messageId));
-        memcpy(buffer + 2, &networkShort, sizeof(networkShort));
+        memcpy(buffer.data() + 2, &networkShort, sizeof(networkShort));
 
-        message->SerializeToArray(buffer + 4, messageSize);
+        message->SerializeToArray(buffer.data() + 4, messageSize);
 
-        ssize_t wrote = write(m_fd, buffer, length);
-        if (wrote < 0) {
+        if (!writeFully(buffer.data(), length)) {
             Logger::instance()->info("Error sending %s, messageId: %d\n", MessageName(messageId).c_str(), messageId);
         }
         else {
-            Logger::instance()->info("Sent %s, messageId: %d, wrote %d bytes\n", MessageName(messageId).c_str(), messageId, wrote);
+            Logger::instance()->info("Sent %s, messageId: %d, wrote %d bytes\n", MessageName(messageId).c_str(), messageId, length);
         }
+    }
 
-        delete[] buffer;
+    // Read exactly length bytes from the fd, looping over partial reads.
+    // Returns false on EOF or error.
+    bool readFully(unsigned char* buffer, size_t length) {
+        size_t total = 0;
+        while (total < length) {
+            ssize_t readBytes = read(m_fd, buffer + total, length - total);
+            if (readBytes <= 0) {
+                return false;
+            }
+            total += (size_t)readBytes;
+        }
+        return true;
     }
 
     MessageId ReadMessage() {
         uint16_t networkShort = 0;
-        ssize_t readBytes;
 
-        readBytes = read(m_fd, &networkShort, 2);
-        if (readBytes != 2) {
-            // Could not read 2 bytes. Do something.
-            Logger::instance()->info("Error reading length, read bytes: %d, errno: %s\n", readBytes, strerror(errno));
+        if (!readFully(reinterpret_cast<unsigned char*>(&networkShort), 2)) {
+            Logger::instance()->info("Error reading length, errno: %s\n", strerror(errno));
             return MessageId::Invalid;
         }
         uint16_t length = ntohs(networkShort);
 
-        readBytes = read(m_fd, &networkShort, 2);
-        if (readBytes != 2) {
-            // Could not read 2 bytes. Do something.
-            Logger::instance()->info("Error reading message id, read bytes: %d, errno: %s\n", readBytes, strerror(errno));
+        if (!readFully(reinterpret_cast<unsigned char*>(&networkShort), 2)) {
+            Logger::instance()->info("Error reading message id, errno: %s\n", strerror(errno));
             return MessageId::Invalid;
         }
         MessageId messageId = static_cast<MessageId>(ntohs(networkShort));
 
         Logger::instance()->info("Read %s. length: %d, messageId: %d\n", MessageName(messageId).c_str(), length, messageId);
-        
-        unsigned char* buffer = new unsigned char[length];
-        readBytes = read(m_fd, buffer, length);
 
-        delete[] buffer;
+        // Consume the full message body so it does not corrupt the next read.
+        std::vector<unsigned char> buffer(length);
+        if (length > 0 && !readFully(buffer.data(), length)) {
+            Logger::instance()->info("Error reading message body of length %d, errno: %s\n", length, strerror(errno));
+            return MessageId::Invalid;
+        }
 
         return messageId;
     }

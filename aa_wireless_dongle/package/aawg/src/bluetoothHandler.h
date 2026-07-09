@@ -2,6 +2,8 @@
 
 #include <optional>
 #include <thread>
+#include <future>
+#include <mutex>
 
 #include "bluetoothCommon.h"
 
@@ -39,7 +41,9 @@ private:
 
     void retryConnectLoop();
 
+    std::mutex connectWithRetryMutex;
     std::shared_ptr<std::promise<void>> connectWithRetryPromise;
+    bool connectWithRetrySignalled = false;
 
     std::shared_ptr<DBus::Dispatcher> m_dispatcher;
     std::shared_ptr<DBus::Connection> m_connection;

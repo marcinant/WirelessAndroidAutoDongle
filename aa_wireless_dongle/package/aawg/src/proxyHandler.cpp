@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <signal.h>
+#include <pthread.h>
 #include <fcntl.h>
 #include <string.h>
 #include <netinet/in.h>
@@ -66,7 +67,7 @@ ssize_t AAWProxy::readMessage(int fd, unsigned char *buffer, size_t buffer_len) 
 }
 
 void AAWProxy::forward(ProxyDirection direction, std::atomic<bool>& should_exit) {
-    size_t buffer_len = 16384;
+    constexpr size_t buffer_len = 16384;
     unsigned char buffer[buffer_len];
 
     bool read_message;
@@ -93,6 +94,14 @@ void AAWProxy::forward(ProxyDirection direction, std::atomic<bool>& should_exit)
             break;
     }
 
+    // Register this thread's handle so stopForwarding() can interrupt our
+    // blocking read() with SIGUSR1. Registered before the loop so a sibling
+    // that fails early can signal us as soon as we start blocking.
+    {
+        std::lock_guard<std::mutex> lock(m_threads_mutex);
+        (direction == ProxyDirection::USB_to_TCP ? m_usb_tcp_handle : m_tcp_usb_handle) = pthread_self();
+    }
+
     while (!should_exit) {
         // Read
         ssize_t len = read_message ? readMessage(read_fd, buffer, buffer_len) : read(read_fd, buffer, buffer_len);
@@ -102,7 +111,7 @@ void AAWProxy::forward(ProxyDirection direction, std::atomic<bool>& should_exit)
             m_log_communication = true;
         }
         if (m_log_communication) {
-            Logger::instance()->info("%d bytes read from %s\n", len, read_name.c_str());
+            Logger::instance()->info("%zd bytes read from %s\n", len, read_name.c_str());
         }
 
         if (len < 0) {
@@ -124,7 +133,7 @@ void AAWProxy::forward(ProxyDirection direction, std::atomic<bool>& should_exit)
             m_log_communication = true;
         }
         if (m_log_communication) {
-            Logger::instance()->info("%d bytes written to %s\n", wlen, write_name.c_str());
+            Logger::instance()->info("%zd bytes written to %s\n", wlen, write_name.c_str());
         }
 
         if (wlen < 0) {
@@ -136,6 +145,13 @@ void AAWProxy::forward(ProxyDirection direction, std::atomic<bool>& should_exit)
         }
     }
 
+    // Deregister our handle before signalling the sibling so we don't signal
+    // ourselves and so a stale handle is never used.
+    {
+        std::lock_guard<std::mutex> lock(m_threads_mutex);
+        (direction == ProxyDirection::USB_to_TCP ? m_usb_tcp_handle : m_tcp_usb_handle) = std::nullopt;
+    }
+
     stopForwarding(should_exit);
 }
 
@@ -143,12 +159,13 @@ void AAWProxy::stopForwarding(std::atomic<bool>& should_exit) {
     Logger::instance()->info("Interrupting threads to stop forwarding\n");
     should_exit = true;
 
-    if (m_usb_tcp_thread) {
-        pthread_kill(m_usb_tcp_thread->native_handle(), SIGUSR1);
+    std::lock_guard<std::mutex> lock(m_threads_mutex);
+    if (m_usb_tcp_handle) {
+        pthread_kill(*m_usb_tcp_handle, SIGUSR1);
     }
 
-    if (m_tcp_usb_thread) {
-        pthread_kill(m_tcp_usb_thread->native_handle(), SIGUSR1);
+    if (m_tcp_usb_handle) {
+        pthread_kill(*m_tcp_usb_handle, SIGUSR1);
     }
 }
 
@@ -170,6 +187,8 @@ void AAWProxy::handleClient(int server_sock) {
 
     if (Config::instance()->getConnectionStrategy() != ConnectionStrategy::USB_FIRST) {
         if (!UsbManager::instance().enableDefaultAndWaitForAccessory(std::chrono::seconds(30))) {
+            close(m_tcp_fd);
+            m_tcp_fd = -1;
             return;
         }
     }
@@ -177,6 +196,8 @@ void AAWProxy::handleClient(int server_sock) {
     Logger::instance()->info("Opening usb accessory\n");
     if ((m_usb_fd = open("/dev/usb_accessory", O_RDWR)) < 0) {
         Logger::instance()->info("error opening /dev/usb_accessory: %s\n", strerror(errno));
+        close(m_tcp_fd);
+        m_tcp_fd = -1;
         return;
     }
 
@@ -188,6 +209,10 @@ void AAWProxy::handleClient(int server_sock) {
 
     if (setsockopt(m_tcp_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv))) {
         Logger::instance()->info("setsockopt failed: %s\n", strerror(errno));
+        close(m_usb_fd);
+        m_usb_fd = -1;
+        close(m_tcp_fd);
+        m_tcp_fd = -1;
         return;
     }
 

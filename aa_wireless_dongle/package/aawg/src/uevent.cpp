@@ -47,16 +47,32 @@ void UeventMonitor::monitorLoop(int nl_socket) {
             current += strlen(current) + 1;
         }
 
-        // Call the handlers
-        for (auto it = handlers.cbegin(); it != handlers.cend(); ++it) {
+        // Move the current handlers out under lock, then invoke them without
+        // holding the lock so a handler may safely call addHandler().
+        std::list<std::function<bool(UeventEnv)>> localHandlers;
+        {
+            std::lock_guard<std::mutex> lock(handlersMutex);
+            localHandlers.swap(handlers);
+        }
+
+        for (auto it = localHandlers.begin(); it != localHandlers.end(); ) {
             if ((*it)(envMap)) {
-                it = handlers.erase(it);
+                it = localHandlers.erase(it);
+            } else {
+                ++it;
             }
+        }
+
+        // Put the survivors back ahead of any handlers added during callbacks.
+        {
+            std::lock_guard<std::mutex> lock(handlersMutex);
+            handlers.splice(handlers.begin(), localHandlers);
         }
     }
 }
 
 void UeventMonitor::addHandler(std::function<bool(UeventEnv)> handler) {
+    std::lock_guard<std::mutex> lock(handlersMutex);
     handlers.push_back(handler);
 }
 
