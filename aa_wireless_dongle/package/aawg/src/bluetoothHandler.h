@@ -4,6 +4,7 @@
 #include <thread>
 #include <future>
 #include <mutex>
+#include <atomic>
 
 #include "bluetoothCommon.h"
 
@@ -22,6 +23,9 @@ public:
 
     std::optional<std::thread> connectWithRetry();
     void stopConnectWithRetry();
+
+    void releaseHandsetLink(const std::string& devicePath);
+    void notifyAaSessionStarted();
 
 private:
     BluetoothHandler() {};
@@ -44,6 +48,10 @@ private:
     std::mutex connectWithRetryMutex;
     std::shared_ptr<std::promise<void>> connectWithRetryPromise;
     bool connectWithRetrySignalled = false;
+
+    // Set when the phone opens the AA Wireless channel; the retry loop must
+    // not disconnect-and-reconnect the device while the bootstrap is running.
+    std::atomic<bool> m_aaSessionActive{false};
 
     std::shared_ptr<DBus::Dispatcher> m_dispatcher;
     std::shared_ptr<DBus::Connection> m_connection;

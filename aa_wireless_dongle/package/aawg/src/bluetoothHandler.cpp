@@ -137,7 +137,8 @@ void BluetoothHandler::exportProfiles() {
         });
         Logger::instance()->info("Bluetooth AA Wireless profile active\n");
 
-        if (Config::instance()->getConnectionStrategy() != ConnectionStrategy::DONGLE_MODE) {
+        if (Config::instance()->getConnectionStrategy() != ConnectionStrategy::DONGLE_MODE
+                && !Config::instance()->isHspDisabled()) {
             // Register HSP Handset profile
             m_hspProfile = HSPHSProfile::create(HSP_HS_PROFILE_OBJECT_PATH);
             if (m_connection->register_object(m_hspProfile, DBus::ThreadForCalling::DispatcherThread) != DBus::RegistrationStatus::Success) {
@@ -216,6 +217,22 @@ void BluetoothHandler::connectDevice() {
     }
 
     const bool isDongleMode = (Config::instance()->getConnectionStrategy() == ConnectionStrategy::DONGLE_MODE);
+    const bool hspDisabled = !isDongleMode && Config::instance()->isHspDisabled();
+
+    // Which profile to connect on the phone:
+    //   - Dongle mode: "" (all profiles).
+    //   - HSP disabled: the AA Wireless profile, so we nudge the phone to start
+    //     projection without ever touching its hands-free/call profile (leaves
+    //     the car's HFP free).
+    //   - Default: the fake HSP AG handset, original behaviour.
+    std::string connectUuid;
+    if (isDongleMode) {
+        connectUuid = "";
+    } else if (hspDisabled) {
+        connectUuid = AAWG_PROFILE_UUID;
+    } else {
+        connectUuid = HSP_AG_UUID;
+    }
 
     Logger::instance()->info("Found %zu bluetooth devices\n", device_paths.size());
 
@@ -230,16 +247,43 @@ void BluetoothHandler::connectDevice() {
 
         try {
             if (deviceConnected && deviceConnected->value()) {
+                if (hspDisabled || m_aaSessionActive) {
+                    // A link is already up and either there is no HSP to
+                    // re-engage the phone with (hspDisabled), or the phone has
+                    // already opened the AA Wireless channel and is
+                    // mid-bootstrap. The disconnect-and-reconnect nudge (for
+                    // warm reconnects with a stale session) would kill that
+                    // handshake, so leave the device alone.
+                    Logger::instance()->info("Bluetooth device already connected, leaving it untouched\n");
+                    return;
+                }
                 Logger::instance()->info("Bluetooth device already connected, disconnecting\n");
                 disconnect();
             }
-            connectProfile(isDongleMode ? "" : HSP_AG_UUID);
+            connectProfile(connectUuid);
             Logger::instance()->info("Bluetooth connected to the device\n");
             if (!isDongleMode) {
                 return;
             }
         } catch (DBus::Error& e) {
-            if (!isDongleMode) {
+            if (hspDisabled) {
+                // The phone is the client for the AA Wireless service, so it may
+                // not export that UUID in its SDP at all — ConnectProfile can
+                // then fail without ever paging the phone. Fall back to a
+                // generic Connect() to at least raise an ACL link: for a bonded
+                // phone that is enough of a nudge to notice the dongle and
+                // initiate the AA Wireless connection itself. With HSP not
+                // registered the phone cannot land on our hands-free profile
+                // either way.
+                try {
+                    DBus::MethodProxy connect = *(bluezDevice->create_method<void()>(INTERFACE_BLUEZ_DEVICE, "Connect"));
+                    connect();
+                    Logger::instance()->info("Generic bluetooth connect succeeded\n");
+                    return;
+                } catch (DBus::Error& e2) {
+                    Logger::instance()->info("Failed to connect device at path: %s\n", device_path.c_str());
+                }
+            } else if (!isDongleMode) {
                 Logger::instance()->info("Failed to connect device at path: %s\n", device_path.c_str());
             }
         }
@@ -247,6 +291,32 @@ void BluetoothHandler::connectDevice() {
 
     if (!isDongleMode) {
         Logger::instance()->info("Failed to connect to any known bluetooth device\n");
+    }
+}
+
+void BluetoothHandler::notifyAaSessionStarted() {
+    m_aaSessionActive = true;
+}
+
+void BluetoothHandler::releaseHandsetLink(const std::string& devicePath) {
+    if (!m_connection) {
+        return;
+    }
+
+    std::shared_ptr<DBus::ObjectProxy> bluezDevice = m_connection->create_object_proxy(BLUEZ_BUS_NAME, devicePath);
+    DBus::MethodProxy disconnectProfile = *(bluezDevice->create_method<void(std::string)>(INTERFACE_BLUEZ_DEVICE, "DisconnectProfile"));
+
+    try {
+        disconnectProfile(HSP_HS_UUID);
+        Logger::instance()->info("Released HSP handset link for %s\n", devicePath.c_str());
+    } catch (DBus::Error& e) {
+        // Some BlueZ versions key the device service by the remote (AG) uuid
+        try {
+            disconnectProfile(HSP_AG_UUID);
+            Logger::instance()->info("Released HSP handset link (AG uuid) for %s\n", devicePath.c_str());
+        } catch (DBus::Error& e2) {
+            Logger::instance()->info("Failed to release HSP link for %s: %s\n", devicePath.c_str(), e2.what());
+        }
     }
 }
 
@@ -309,6 +379,9 @@ std::optional<std::thread> BluetoothHandler::connectWithRetry() {
         connectWithRetryPromise = std::make_shared<std::promise<void>>();
         connectWithRetrySignalled = false;
     }
+    // New session: forget any previous bootstrap state so the warm-reconnect
+    // nudge works again if the phone shows up with a stale connection.
+    m_aaSessionActive = false;
     return std::thread(&BluetoothHandler::retryConnectLoop, this);
 }
 

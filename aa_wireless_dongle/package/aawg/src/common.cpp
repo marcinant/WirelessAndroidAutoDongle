@@ -85,6 +85,26 @@ ConnectionStrategy Config::getConnectionStrategy() {
 
     return strategy;
 }
+
+bool Config::earlyHspRelease() {
+    // When enabled (default), the fake HSP handset link is disconnected as soon
+    // as the phone opens the AA Wireless channel. The handset is only needed as
+    // the wake-up trigger for wireless Android Auto; dropping it right away
+    // frees the phone's hands-free/call profile for the car's own bluetooth
+    // seconds earlier than waiting for the full bluetooth power-off.
+    static const bool enabled = (getenv("AAWG_EARLY_HSP_RELEASE", 1) != 0);
+    return enabled;
+}
+
+bool Config::isHspDisabled() {
+    // When set, the dongle does not register or connect the fake HSP Handset
+    // profile. Without it the dongle never occupies the phone's hands-free/call
+    // profile, so the car's own HFP (e.g. Audi MMI) stays connectable for phone
+    // calls. Some phones need the fake handset to trigger wireless Android Auto,
+    // so this is opt-in. Default 0 (HSP enabled, original behaviour).
+    static const bool disabled = (getenv("AAWG_DISABLE_HSP", 0) != 0);
+    return disabled;
+}
 #pragma endregion Config
 
 #pragma region Logger

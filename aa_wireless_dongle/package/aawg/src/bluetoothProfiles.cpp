@@ -242,7 +242,20 @@ void AAWirelessProfile::NewConnection(DBus::Path path, std::shared_ptr<DBus::Fil
     // dispatcher freezes all other DBus traffic on the connection). Capture the
     // FileDescriptor shared_ptr so the fd stays open for the worker's lifetime;
     // it would otherwise be closed when NewConnection returns.
-    std::thread([fd]() {
+    // Tell the retry loop the phone reached us so it stops nudging the device
+    // with disconnect-reconnect cycles while the bootstrap runs.
+    BluetoothHandler::instance().notifyAaSessionStarted();
+
+    std::thread([path, fd]() {
+        if (Config::instance()->getConnectionStrategy() != ConnectionStrategy::DONGLE_MODE
+                && !Config::instance()->isHspDisabled()
+                && Config::instance()->earlyHspRelease()) {
+            // The phone has opened the AA Wireless channel, so the fake handset
+            // has served its purpose as the wake-up trigger. Drop it now to free
+            // the phone's hands-free/call profile for the car's own bluetooth
+            // as early as possible.
+            BluetoothHandler::instance().releaseHandsetLink(path);
+        }
         AAWirelessLauncher(fd->descriptor()).launch();
         Logger::instance()->info("Bluetooth launch sequence completed\n");
     }).detach();

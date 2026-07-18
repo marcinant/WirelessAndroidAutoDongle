@@ -29,6 +29,8 @@ public:
 
     WifiInfo getWifiInfo();
     ConnectionStrategy getConnectionStrategy();
+    bool isHspDisabled();
+    bool earlyHspRelease();
 
     std::string getUniqueSuffix();
 private:
