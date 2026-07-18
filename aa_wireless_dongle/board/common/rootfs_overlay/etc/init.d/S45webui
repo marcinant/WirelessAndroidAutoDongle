@@ -1,0 +1,44 @@
+#!/bin/sh
+#
+# Start the aawg diagnostics web UI (busybox httpd)
+#
+
+WEBROOT="/usr/share/aawg-webui"
+PIDFILE="/var/run/webui-httpd.pid"
+
+case "$1" in
+	start)
+		if [ -z "$AAWG_CONF_SOURCED" ]; then
+			echo "Source /etc/aawgd.conf"
+			source /etc/aawgd.conf
+		fi
+
+		if [ "${AAWG_ENABLE_WEBUI:-1}" = "0" ]; then
+			echo "AAWG_ENABLE_WEBUI is 0. Skipping web UI."
+			exit 0
+		fi
+
+		AUTH_ARGS=""
+		if [ -n "${AAWG_WEBUI_PASSWORD:-}" ]; then
+			# Protect everything with basic auth, user "admin"
+			echo "/:admin:${AAWG_WEBUI_PASSWORD}" > /var/run/webui-httpd.conf
+			AUTH_ARGS="-c /var/run/webui-httpd.conf"
+		fi
+
+		printf "Starting web UI: "
+		start-stop-daemon -S -b -q -m -p "$PIDFILE" -x /usr/sbin/httpd -- -f -h "$WEBROOT" -p 80 $AUTH_ARGS
+		[ $? = 0 ] && echo "OK" || echo "FAIL"
+		;;
+	stop)
+		printf "Stopping web UI: "
+		start-stop-daemon -K -q -p "$PIDFILE"
+		[ $? = 0 ] && echo "OK" || echo "FAIL"
+		;;
+	restart)
+		$0 stop
+		$0 start
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart}"
+		;;
+esac

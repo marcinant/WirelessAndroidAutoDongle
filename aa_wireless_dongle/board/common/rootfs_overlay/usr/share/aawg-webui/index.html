@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AA Wireless Dongle</title>
+<style>
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, sans-serif; background: #14171a; color: #dde3e8; }
+header { padding: 14px 20px; background: #1d2126; border-bottom: 1px solid #2c323a; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+header h1 { margin: 0; font-size: 18px; }
+header .up { color: #7f8b96; font-size: 13px; }
+main { padding: 16px 20px; max-width: 980px; margin: 0 auto; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.card { background: #1d2126; border: 1px solid #2c323a; border-radius: 8px; padding: 10px 12px; }
+.card .k { font-size: 12px; color: #7f8b96; text-transform: uppercase; letter-spacing: .04em; }
+.card .v { font-size: 15px; margin-top: 4px; word-break: break-all; }
+.ok { color: #6fd38b; } .warn { color: #e8c268; } .bad { color: #e87a68; }
+#stage { margin-top: 12px; padding: 10px 12px; background: #1d2126; border: 1px solid #2c323a; border-radius: 8px; font-size: 13px; color: #aeb8c2; word-break: break-all; }
+#hint { margin-top: 8px; padding: 10px 12px; border-radius: 8px; font-size: 14px; display: none; }
+#hint.show { display: block; background: #2a2617; border: 1px solid #57491f; color: #e8c268; }
+h2 { font-size: 15px; margin: 22px 0 8px; color: #aeb8c2; }
+#log { background: #0d0f11; border: 1px solid #2c323a; border-radius: 8px; padding: 10px; height: 320px; overflow-y: scroll; font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+button, textarea { font: inherit; }
+button { background: #2c5aa0; color: #fff; border: 0; border-radius: 6px; padding: 7px 14px; cursor: pointer; margin-right: 8px; }
+button.sec { background: #2c323a; }
+button.danger { background: #8a3b2e; }
+button:disabled { opacity: .5; cursor: default; }
+#conf { width: 100%; height: 260px; background: #0d0f11; color: #dde3e8; border: 1px solid #2c323a; border-radius: 8px; padding: 10px; font-family: ui-monospace, monospace; font-size: 13px; }
+.row { margin-top: 8px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+#msg { font-size: 13px; color: #7f8b96; }
+label { font-size: 13px; color: #7f8b96; }
+</style>
+</head>
+<body>
+<header>
+	<h1>AA Wireless Dongle</h1>
+	<span class="up" id="uptime">–</span>
+</header>
+<main>
+	<div class="cards">
+		<div class="card"><div class="k">Daemon</div><div class="v" id="daemon">–</div></div>
+		<div class="card"><div class="k">Bluetooth</div><div class="v" id="bt">–</div></div>
+		<div class="card"><div class="k">Wifi client</div><div class="v" id="wifi">–</div></div>
+		<div class="card"><div class="k">AA session (TCP)</div><div class="v" id="tcp">–</div></div>
+		<div class="card"><div class="k">USB gadget</div><div class="v" id="usb">–</div></div>
+	</div>
+	<div id="stage">–</div>
+	<div id="hint"></div>
+
+	<h2>Log</h2>
+	<div id="log"></div>
+	<div class="row">
+		<button class="sec" id="pause">Pause</button>
+		<label><input type="checkbox" id="follow" checked> follow</label>
+	</div>
+
+	<h2>Configuration (/boot/aawgd.conf)</h2>
+	<textarea id="conf" spellcheck="false"></textarea>
+	<div class="row">
+		<button id="save">Save</button>
+		<button class="sec" id="reload">Reload</button>
+		<button class="danger" id="reboot">Reboot dongle</button>
+		<span id="msg"></span>
+	</div>
+</main>
+<script>
+"use strict";
+var paused = false;
+
+function fmtUptime(s) {
+	var d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+	return (d ? d + "d " : "") + h + "h " + m + "m";
+}
+
+function setV(id, text, cls) {
+	var el = document.getElementById(id);
+	el.textContent = text;
+	el.className = "v" + (cls ? " " + cls : "");
+}
+
+function hint(text) {
+	var el = document.getElementById("hint");
+	if (text) { el.textContent = "Hint: " + text; el.className = "show"; }
+	else { el.className = ""; }
+}
+
+function deriveHint(s) {
+	var st = s.stage || "";
+	if (!s.aawgd_running) return "aawgd is not running - reboot the dongle or check the log for a crash.";
+	if (s.tcp_state === "ESTABLISHED" && s.usb_gadget === "none")
+		return "Phone connected over wifi but no USB gadget is active - check the USB cable and use the data port of the car.";
+	if (s.tcp_state === "ESTABLISHED" && s.usb_gadget === "default" && st.indexOf("Forwarding data") < 0)
+		return "Waiting for the head unit accessory-start - if this persists, try unplugging and replugging the USB cable.";
+	if (s.bt_powered && s.tcp_state === "none" && !s.wifi_stations && st.indexOf("powered on") >= 0)
+		return "Waiting for the phone - make sure bluetooth is on and the dongle is paired (see the phone's bluetooth settings).";
+	if (st.indexOf("handshake read failed") >= 0)
+		return "Wifi handshake failed - on the phone, forget the dongle wifi network and reconnect, or re-pair bluetooth.";
+	if (st.indexOf("Failed to connect") >= 0 && s.tcp_state === "none")
+		return "Cannot reach the phone over bluetooth - bring the phone close, or open Android Auto manually to trigger the connection.";
+	return "";
+}
+
+function tick() {
+	fetch("/cgi-bin/status.cgi").then(function (r) { return r.json(); }).then(function (s) {
+		document.getElementById("uptime").textContent = "uptime " + fmtUptime(s.uptime_s);
+		setV("daemon", s.aawgd_running ? "running" : "stopped", s.aawgd_running ? "ok" : "bad");
+		var bt = s.bt_powered ? "powered" : "off";
+		if (s.bt_devices) bt += " · " + s.bt_devices.replace(/;$/, "").replace(/;/g, ", ");
+		setV("bt", bt, s.bt_powered ? "ok" : "");
+		setV("wifi", s.wifi_stations ? s.wifi_stations.replace(/;$/, "").replace(/;/g, ", ") : "none", s.wifi_stations ? "ok" : "");
+		setV("tcp", s.tcp_state, s.tcp_state === "ESTABLISHED" ? "ok" : (s.tcp_state === "none" ? "" : "warn"));
+		setV("usb", s.usb_gadget, s.usb_gadget === "accessory" ? "ok" : (s.usb_gadget === "none" ? "" : "warn"));
+		document.getElementById("stage").textContent = s.stage || "no aawgd activity in the log yet";
+		hint(deriveHint(s));
+	}).catch(function () {});
+}
+
+function tickLog() {
+	if (paused) return;
+	fetch("/cgi-bin/logs.cgi?n=300").then(function (r) { return r.text(); }).then(function (t) {
+		var el = document.getElementById("log");
+		el.textContent = t;
+		if (document.getElementById("follow").checked) el.scrollTop = el.scrollHeight;
+	}).catch(function () {});
+}
+
+function loadConf() {
+	fetch("/cgi-bin/config.cgi").then(function (r) { return r.text(); }).then(function (t) {
+		document.getElementById("conf").value = t;
+	});
+}
+
+document.getElementById("pause").onclick = function () {
+	paused = !paused;
+	this.textContent = paused ? "Resume" : "Pause";
+};
+document.getElementById("reload").onclick = loadConf;
+document.getElementById("save").onclick = function () {
+	var btn = this, msg = document.getElementById("msg");
+	btn.disabled = true; msg.textContent = "saving...";
+	fetch("/cgi-bin/config.cgi", { method: "POST", headers: { "Content-Type": "text/plain" }, body: document.getElementById("conf").value })
+		.then(function (r) { return r.json(); })
+		.then(function (j) { msg.textContent = j.ok ? j.note : ("error: " + j.error); })
+		.catch(function (e) { msg.textContent = "error: " + e; })
+		.then(function () { btn.disabled = false; });
+};
+document.getElementById("reboot").onclick = function () {
+	if (!confirm("Reboot the dongle now?")) return;
+	fetch("/cgi-bin/reboot.cgi", { method: "POST" });
+	document.getElementById("msg").textContent = "rebooting...";
+};
+
+tick(); tickLog(); loadConf();
+setInterval(tick, 2000);
+setInterval(tickLog, 3000);
+</script>
+</body>
+</html>

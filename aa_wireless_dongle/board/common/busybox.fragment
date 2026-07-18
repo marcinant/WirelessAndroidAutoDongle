@@ -1,0 +1,8 @@
+# Extra busybox applets for the aawg web UI (see board/common/rootfs_overlay/etc/init.d/S45webui)
+CONFIG_HTTPD=y
+CONFIG_FEATURE_HTTPD_RANGES=y
+CONFIG_FEATURE_HTTPD_BASIC_AUTH=y
+CONFIG_FEATURE_HTTPD_CGI=y
+CONFIG_FEATURE_HTTPD_ENCODE_URL_STR=y
+# Used by the web UI CGI scripts to bound external commands
+CONFIG_TIMEOUT=y
