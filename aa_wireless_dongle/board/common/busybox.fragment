@@ -6,3 +6,7 @@ CONFIG_FEATURE_HTTPD_CGI=y
 CONFIG_FEATURE_HTTPD_ENCODE_URL_STR=y
 # Used by the web UI CGI scripts to bound external commands
 CONFIG_TIMEOUT=y
+# Used by aawg-homesync: wget --header/--post-data/--post-file for the
+# Home Assistant report and stats upload, ntpd -q for the boot clock sync
+CONFIG_FEATURE_WGET_LONG_OPTIONS=y
+CONFIG_NTPD=y

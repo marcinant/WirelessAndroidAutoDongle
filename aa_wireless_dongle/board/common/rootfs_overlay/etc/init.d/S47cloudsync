@@ -1,0 +1,41 @@
+#!/bin/sh
+#
+# Start the aawg cloud sync (telemetry push over Bluetooth PAN tethering)
+#
+
+PIDFILE="/var/run/aawg-cloudsync.pid"
+
+case "$1" in
+	start)
+		if [ -z "$AAWG_CONF_SOURCED" ]; then
+			echo "Source /etc/aawgd.conf"
+			source /etc/aawgd.conf
+		fi
+
+		if [ "${AAWG_CLOUD_SYNC:-1}" = "0" ]; then
+			echo "AAWG_CLOUD_SYNC is 0. Skipping cloud sync."
+			exit 0
+		fi
+
+		if [ -z "${AAWG_HA_URL:-}" ] && [ -z "${AAWG_CLOUD_URL:-}" ] && [ -z "${AAWG_LOG_UPLOAD_URL:-}" ]; then
+			echo "No cloud endpoint configured. Skipping cloud sync."
+			exit 0
+		fi
+
+		printf "Starting cloud sync: "
+		start-stop-daemon -S -b -q -m -p "$PIDFILE" -x /usr/sbin/aawg-cloudsync
+		[ $? = 0 ] && echo "OK" || echo "FAIL"
+		;;
+	stop)
+		printf "Stopping cloud sync: "
+		start-stop-daemon -K -q -p "$PIDFILE"
+		[ $? = 0 ] && echo "OK" || echo "FAIL"
+		;;
+	restart)
+		$0 stop
+		$0 start
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart}"
+		;;
+esac

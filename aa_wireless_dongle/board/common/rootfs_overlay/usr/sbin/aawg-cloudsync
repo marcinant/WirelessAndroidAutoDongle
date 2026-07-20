@@ -1,0 +1,193 @@
+#!/bin/sh
+#
+# aawg-cloudsync: push dongle telemetry to a public endpoint (Home Assistant,
+# generic webhook, log collector) over the PHONE's internet connection.
+#
+# The wifi radio is busy being the AA access point, so the uplink is
+# Bluetooth PAN tethering: the phone (already paired for the AA handshake,
+# and idle on BT once the early HSP release has run) shares its mobile data
+# over bnep0. Requires "Bluetooth tethering" enabled on the phone.
+#
+# Loop: once the AA session is up (phone is definitely nearby), connect PAN,
+# DHCP on bnep0, sync the clock once per boot (no RTC), then push every
+# AAWG_CLOUD_INTERVAL seconds:
+#   - Home Assistant REST state (AAWG_HA_URL + AAWG_HA_TOKEN + AAWG_HA_ENTITY)
+#   - generic JSON webhook (AAWG_CLOUD_URL, e.g. an HA webhook - no token)
+#   - stats history file collected by aawg-statsd (AAWG_LOG_UPLOAD_URL)
+# Two consecutive push failures tear the PAN link down and start over.
+#
+# HTTPS works when curl is on the image (it is, with ca-certificates);
+# busybox wget is the http-only fallback.
+
+PAN_PID=/var/run/aawg-pan.pid
+HIST=/persist/aawg/history.log
+INTERVAL="${AAWG_CLOUD_INTERVAL:-300}"
+
+log() {
+	logger -t aawg-cloudsync "$1"
+}
+
+phone_mac() {
+	if [ -n "${AAWG_PAN_PHONE_MAC:-}" ]; then
+		echo "$AAWG_PAN_PHONE_MAC"
+		return
+	fi
+	# Default: the first (usually only) paired device
+	timeout 5 bluetoothctl devices Paired </dev/null 2>/dev/null | awk '$1 == "Device" {print $2; exit}'
+}
+
+aa_session_up() {
+	netstat -tn 2>/dev/null | grep ':5288' | grep -q ESTABLISHED
+}
+
+pan_up() {
+	ip -4 addr show bnep0 2>/dev/null | grep -q inet
+}
+
+pan_teardown() {
+	[ -f "$PAN_PID" ] && kill "$(cat "$PAN_PID")" 2>/dev/null
+	rm -f "$PAN_PID"
+}
+
+pan_connect() {
+	mac=$(phone_mac)
+	[ -n "$mac" ] || return 1
+
+	pan_teardown
+	# bt-network holds the PAN connection while it runs
+	start-stop-daemon -S -b -q -m -p "$PAN_PID" -x /usr/bin/bt-network -- -c "$mac" nap
+
+	waited=0
+	while [ ! -d /sys/class/net/bnep0 ] && [ $waited -lt 10 ]; do
+		sleep 1
+		waited=$((waited + 1))
+	done
+	if [ ! -d /sys/class/net/bnep0 ]; then
+		pan_teardown
+		return 1
+	fi
+
+	ip link set bnep0 up
+	if ! timeout 20 udhcpc -i bnep0 -n -q -t 3 -T 3 >/dev/null 2>&1; then
+		pan_teardown
+		return 1
+	fi
+	log "PAN uplink via $mac up"
+	return 0
+}
+
+# post_json <url> <body> [bearer-token]; post_file <url> <path>
+post_json() {
+	if command -v curl >/dev/null 2>&1; then
+		if [ -n "${3:-}" ]; then
+			curl -fsS -m 15 -o /dev/null -H "Content-Type: application/json" \
+				-H "Authorization: Bearer $3" -d "$2" "$1" 2>/dev/null
+		else
+			curl -fsS -m 15 -o /dev/null -H "Content-Type: application/json" \
+				-d "$2" "$1" 2>/dev/null
+		fi
+	else
+		if [ -n "${3:-}" ]; then
+			timeout 20 wget -q -O /dev/null --header "Content-Type: application/json" \
+				--header "Authorization: Bearer $3" --post-data "$2" "$1" 2>/dev/null
+		else
+			timeout 20 wget -q -O /dev/null --header "Content-Type: application/json" \
+				--post-data "$2" "$1" 2>/dev/null
+		fi
+	fi
+}
+
+post_file() {
+	if command -v curl >/dev/null 2>&1; then
+		curl -fsS -m 30 -o /dev/null -H "Content-Type: text/plain" \
+			--data-binary "@$2" "$1" 2>/dev/null
+	else
+		timeout 30 wget -q -O /dev/null --header "Content-Type: text/plain" \
+			--post-file "$2" "$1" 2>/dev/null
+	fi
+}
+
+push() {
+	ok=1
+	up=$(cut -d. -f1 /proc/uptime)
+	sess=0
+	aa_session_up && sess=1
+	# Latest per-minute sample: epoch uptime rx tx signal tx_failed session
+	last=$(tail -n 1 "$HIST" 2>/dev/null)
+	sig=$(echo "$last" | awk '{print $5}')
+	ts=$(date -Iseconds)
+
+	if [ -n "${AAWG_HA_URL:-}" ] && [ -n "${AAWG_HA_TOKEN:-}" ]; then
+		entity="${AAWG_HA_ENTITY:-binary_sensor.car_running}"
+		body="{\"state\":\"on\",\"attributes\":{\"friendly_name\":\"Car running\",\"device_class\":\"running\",\"uptime_s\":$up,\"aa_session\":$sess,\"wifi_signal_dbm\":\"${sig:-}\",\"reported_at\":\"$ts\"}}"
+		if post_json "${AAWG_HA_URL%/}/api/states/$entity" "$body" "$AAWG_HA_TOKEN"; then
+			log "pushed state to Home Assistant ($entity)"
+		else
+			log "Home Assistant push failed"
+			ok=0
+		fi
+	fi
+
+	if [ -n "${AAWG_CLOUD_URL:-}" ]; then
+		body="{\"device\":\"aawg-dongle\",\"uptime_s\":$up,\"aa_session\":$sess,\"wifi_signal_dbm\":\"${sig:-}\",\"reported_at\":\"$ts\"}"
+		if post_json "$AAWG_CLOUD_URL" "$body"; then
+			log "pushed telemetry to webhook"
+		else
+			log "webhook push failed"
+			ok=0
+		fi
+	fi
+
+	if [ -n "${AAWG_LOG_UPLOAD_URL:-}" ] && [ -s "$HIST" ]; then
+		if post_file "$AAWG_LOG_UPLOAD_URL" "$HIST"; then
+			cat "$HIST" >> "$HIST.sent" 2>/dev/null
+			: > "$HIST"
+			log "uploaded stats history"
+		else
+			log "stats history upload failed"
+			ok=0
+		fi
+	fi
+
+	[ $ok = 1 ]
+}
+
+clock_synced=0
+fails=0
+
+while :; do
+	if ! pan_up; then
+		# Only chase the phone's BT when it is certainly nearby: during an
+		# active AA session, or in the first minutes after boot.
+		if aa_session_up || [ "$(cut -d. -f1 /proc/uptime)" -lt 300 ]; then
+			pan_connect || sleep 45
+		else
+			sleep 45
+		fi
+		continue
+	fi
+
+	if [ $clock_synced = 0 ]; then
+		if timeout 15 ntpd -n -q -p "${AAWG_NTP_SERVER:-pool.ntp.org}" >/dev/null 2>&1; then
+			clock_synced=1
+			mkdir -p /persist/aawg
+			date +%s > /persist/aawg/last-time
+			log "clock synced: $(date)"
+		fi
+	fi
+
+	if push; then
+		fails=0
+	else
+		fails=$((fails + 1))
+		if [ $fails -ge 2 ]; then
+			log "pushes keep failing, recycling PAN link"
+			pan_teardown
+			fails=0
+			sleep 15
+			continue
+		fi
+	fi
+
+	sleep "$INTERVAL"
+done
