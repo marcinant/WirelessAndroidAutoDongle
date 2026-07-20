@@ -5,6 +5,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { RootStackParamList } from '../nav';
 import { colors, space } from '../theme/theme';
+import { t } from '../i18n';
 import { getLog, setWebuiPassword } from '../api/client';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Logs'>;
@@ -42,15 +43,15 @@ export default function LogsScreen({ route }: Props) {
     <View style={[styles.screen, { paddingBottom: insets.bottom }]}>
       <ScrollView ref={scroll} style={styles.log} contentContainerStyle={styles.logContent}>
         <Text style={styles.mono} selectable>
-          {text || 'loading…'}
+          {text || t('log.loading')}
         </Text>
       </ScrollView>
       <View style={styles.bar}>
         <TouchableOpacity style={styles.barBtn} onPress={() => setPaused(p => !p)}>
-          <Text style={styles.barText}>{paused ? 'Resume' : 'Pause'}</Text>
+          <Text style={styles.barText}>{paused ? t('log.resume') : t('log.pause')}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.barBtn} onPress={() => setFollow(f => !f)}>
-          <Text style={[styles.barText, follow && styles.on]}>Follow {follow ? 'on' : 'off'}</Text>
+          <Text style={[styles.barText, follow && styles.on]}>{follow ? t('log.follow.on') : t('log.follow.off')}</Text>
         </TouchableOpacity>
       </View>
     </View>

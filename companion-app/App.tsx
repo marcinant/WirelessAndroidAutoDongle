@@ -14,6 +14,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { RootStackParamList } from './src/nav';
 import { colors } from './src/theme/theme';
 import { loadDongle, SavedDongle } from './src/onboarding/store';
+import { t } from './src/i18n';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 import DashboardScreen from './src/screens/DashboardScreen';
 import ConfigScreen from './src/screens/ConfigScreen';
@@ -63,16 +64,16 @@ function App(): React.JSX.Element {
             <Stack.Screen
               name="Onboarding"
               component={OnboardingScreen}
-              options={{ title: 'Set up dongle' }}
+              options={{ title: t('title.setup') }}
             />
             <Stack.Screen
               name="Dashboard"
               component={DashboardScreen}
-              options={{ title: 'AA Dongle' }}
+              options={{ title: t('title.dashboard') }}
               initialParams={saved ? { dongle: saved } : undefined}
             />
-            <Stack.Screen name="Config" component={ConfigScreen} options={{ title: 'Settings' }} />
-            <Stack.Screen name="Logs" component={LogsScreen} options={{ title: 'Log' }} />
+            <Stack.Screen name="Config" component={ConfigScreen} options={{ title: t('title.settings') }} />
+            <Stack.Screen name="Logs" component={LogsScreen} options={{ title: t('title.log') }} />
           </Stack.Navigator>
         </NavigationContainer>
       )}

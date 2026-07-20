@@ -16,13 +16,14 @@ import {
   setWebuiPassword,
 } from '../api/client';
 import { getConf, setConfMany } from '../api/aawgConf';
+import { t } from '../i18n';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Config'>;
 
 const STRATEGIES = [
-  { v: '0', label: 'Dongle mode' },
-  { v: '1', label: 'Phone first' },
-  { v: '2', label: 'USB first' },
+  { v: '0', k: 'cfg.conn.dongle' },
+  { v: '1', k: 'cfg.conn.phone' },
+  { v: '2', k: 'cfg.conn.usb' },
 ];
 
 export default function ConfigScreen({ route }: Props) {
@@ -79,12 +80,12 @@ export default function ConfigScreen({ route }: Props) {
       const r = await saveConfig(patched);
       if (r.ok) {
         setConf(patched);
-        Alert.alert('Saved', 'Reboot the dongle to apply the changes.');
+        Alert.alert(t('cfg.saved.title'), t('cfg.saved.body'));
       } else {
-        Alert.alert('Save failed', r.error ?? 'unknown error');
+        Alert.alert(t('cfg.savefail.title'), r.error ?? 'unknown error');
       }
     } catch (e: any) {
-      Alert.alert('Save failed', String(e?.message ?? e));
+      Alert.alert(t('cfg.savefail.title'), String(e?.message ?? e));
     } finally {
       setSaving(false);
     }
@@ -92,7 +93,7 @@ export default function ConfigScreen({ route }: Props) {
 
   async function onHaSave() {
     setHaBusy('save');
-    setHaMsg('saving…');
+    setHaMsg(t('cfg.saving'));
     try {
       const r = await saveHa(ha);
       setHaMsg(r.ok ? (r.note ?? 'saved') : `error: ${r.error}`);
@@ -105,15 +106,15 @@ export default function ConfigScreen({ route }: Props) {
 
   async function onHaTest() {
     setHaBusy('test');
-    setHaMsg('testing…');
+    setHaMsg(t('cfg.testing'));
     // Try the phone directly first (it has LTE); fall back to the dongle probe.
     try {
       const res = await fetch(ha.url.replace(/\/$/, '') + '/api/', {
         headers: { Authorization: 'Bearer ' + ha.token },
       });
-      if (res.status === 200) setHaMsg('OK: token accepted (checked from phone)');
-      else if (res.status === 401 || res.status === 403) setHaMsg(`error: token rejected (${res.status})`);
-      else setHaMsg(`error: HA answered ${res.status}`);
+      if (res.status === 200) setHaMsg(t('cfg.ha.ok'));
+      else if (res.status === 401 || res.status === 403) setHaMsg(t('cfg.ha.rejected', { code: res.status }));
+      else setHaMsg(t('cfg.ha.answered', { code: res.status }));
     } catch {
       try {
         const r = await testHa(ha);
@@ -127,16 +128,16 @@ export default function ConfigScreen({ route }: Props) {
   }
 
   function confirmReboot() {
-    Alert.alert('Reboot dongle', 'Reboot now to apply changes?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Reboot', style: 'destructive', onPress: () => reboot() },
+    Alert.alert(t('cfg.reboot.title'), t('cfg.reboot.body'), [
+      { text: t('cfg.cancel'), style: 'cancel' },
+      { text: t('cfg.reboot'), style: 'destructive', onPress: () => reboot() },
     ]);
   }
 
   if (loadErr) {
     return (
       <View style={styles.center}>
-        <Text style={styles.err}>Could not load the dongle config. Are you on its wifi?</Text>
+        <Text style={styles.err}>{t('cfg.load.err')}</Text>
       </View>
     );
   }
@@ -145,62 +146,59 @@ export default function ConfigScreen({ route }: Props) {
     <ScrollView
       style={styles.screen}
       contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + space.xl }]}>
-      <SectionTitle>Home Assistant</SectionTitle>
+      <SectionTitle>{t('cfg.ha.title')}</SectionTitle>
       <Card>
-        <Text style={styles.help}>
-          Reports the car's status over the phone's mobile data (Bluetooth tethering). Create a
-          long-lived token in HA → profile → security.
-        </Text>
-        <Field label="URL" value={ha.url} onChangeText={t => setHa({ ...ha, url: t })} placeholder="https://example.ui.nabu.casa" keyboardType="url" />
-        <Field label="Token" value={ha.token} onChangeText={t => setHa({ ...ha, token: t })} secure placeholder="long-lived access token" />
-        <Field label="Entity" value={ha.entity} onChangeText={t => setHa({ ...ha, entity: t })} placeholder="binary_sensor.car_running" />
+        <Text style={styles.help}>{t('cfg.ha.help')}</Text>
+        <Field label={t('cfg.ha.url')} value={ha.url} onChangeText={v => setHa({ ...ha, url: v })} placeholder="https://example.ui.nabu.casa" keyboardType="url" />
+        <Field label={t('cfg.ha.token')} value={ha.token} onChangeText={v => setHa({ ...ha, token: v })} secure placeholder={t('cfg.ha.token.ph')} />
+        <Field label={t('cfg.ha.entity')} value={ha.entity} onChangeText={v => setHa({ ...ha, entity: v })} placeholder="binary_sensor.car_running" />
         <View style={styles.row}>
-          <Button title="Save" onPress={onHaSave} loading={haBusy === 'save'} />
-          <Button title="Test connection" kind="secondary" onPress={onHaTest} loading={haBusy === 'test'} />
+          <Button title={t('cfg.save')} onPress={onHaSave} loading={haBusy === 'save'} />
+          <Button title={t('cfg.ha.test')} kind="secondary" onPress={onHaTest} loading={haBusy === 'test'} />
         </View>
         {!!haMsg && <Text style={styles.msg}>{haMsg}</Text>}
       </Card>
 
-      <SectionTitle>Connection</SectionTitle>
+      <SectionTitle>{t('cfg.conn.title')}</SectionTitle>
       <Card>
-        <Text style={styles.help}>Connection strategy</Text>
+        <Text style={styles.help}>{t('cfg.conn.strategy')}</Text>
         <View style={styles.segment}>
           {STRATEGIES.map(o => (
             <TouchableOpacity
               key={o.v}
               style={[styles.segItem, strategy === o.v && styles.segItemOn]}
               onPress={() => setStrategy(o.v)}>
-              <Text style={[styles.segText, strategy === o.v && styles.segTextOn]}>{o.label}</Text>
+              <Text style={[styles.segText, strategy === o.v && styles.segTextOn]}>{t(o.k)}</Text>
             </TouchableOpacity>
           ))}
         </View>
         <Toggle
-          label="Early HSP release"
-          hint="Free the car's hands-free profile as soon as AA opens (recommended)."
+          label={t('cfg.hsp.early')}
+          hint={t('cfg.hsp.early.hint')}
           value={earlyHsp}
           onChange={setEarlyHsp}
         />
         <Toggle
-          label="Disable fake headset (HSP)"
-          hint="Keeps HFP for the car, but some phones then won't start wireless AA."
+          label={t('cfg.hsp.disable')}
+          hint={t('cfg.hsp.disable.hint')}
           value={disableHsp}
           onChange={setDisableHsp}
         />
-        <Field label="Country code" value={country} onChangeText={setCountry} placeholder="e.g. PL" />
+        <Field label={t('cfg.country')} value={country} onChangeText={setCountry} placeholder="e.g. PL" />
       </Card>
 
-      <SectionTitle>Cloud telemetry</SectionTitle>
+      <SectionTitle>{t('cfg.cloud.title')}</SectionTitle>
       <Card>
-        <Text style={styles.help}>Optional generic JSON webhook, pushed over Bluetooth tethering.</Text>
-        <Field label="Webhook URL" value={cloudUrl} onChangeText={setCloudUrl} placeholder="https://…/api/webhook/aawg" keyboardType="url" />
-        <Field label="Push interval (s)" value={cloudInterval} onChangeText={setCloudInterval} placeholder="300" />
+        <Text style={styles.help}>{t('cfg.cloud.help')}</Text>
+        <Field label={t('cfg.cloud.url')} value={cloudUrl} onChangeText={setCloudUrl} placeholder="https://…/api/webhook/aawg" keyboardType="url" />
+        <Field label={t('cfg.cloud.interval')} value={cloudInterval} onChangeText={setCloudInterval} placeholder="300" />
       </Card>
 
       <View style={styles.row}>
-        <Button title="Save settings" onPress={saveSettings} loading={saving} />
-        <Button title="Reboot" kind="danger" onPress={confirmReboot} />
+        <Button title={t('cfg.save.settings')} onPress={saveSettings} loading={saving} />
+        <Button title={t('cfg.reboot')} kind="danger" onPress={confirmReboot} />
       </View>
-      <Text style={styles.foot}>Changes take effect after a reboot.</Text>
+      <Text style={styles.foot}>{t('cfg.foot')}</Text>
     </ScrollView>
   );
 }
