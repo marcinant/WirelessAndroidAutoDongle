@@ -43,6 +43,15 @@ std::string Config::getUniqueSuffix() {
         return uniqueSuffix;
     }
 
+#ifdef AAWG_BUILD_HASH
+    // Short git hash of the image build, passed in by aawg.mk. Identifies the
+    // firmware version right in the bluetooth name; device serial is only the
+    // fallback for builds made outside the git tree.
+    if (std::string(AAWG_BUILD_HASH).length() == 6) {
+        return AAWG_BUILD_HASH;
+    }
+#endif
+
     std::ifstream serialNumberFile("/sys/firmware/devicetree/base/serial-number");
 
     std::string serialNumber;

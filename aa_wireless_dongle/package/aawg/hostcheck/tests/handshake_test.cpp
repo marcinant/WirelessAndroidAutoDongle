@@ -55,6 +55,15 @@ void Logger::info(const char* format, ...) {
     va_end(args);
 }
 
+// The handshake source calls into BluetoothHandler (early HSP release); the
+// test only needs the symbols to link, the behaviour is out of scope here.
+BluetoothHandler& BluetoothHandler::instance() { static BluetoothHandler h; return h; }
+void BluetoothHandler::notifyAaSessionStarted() {}
+void BluetoothHandler::releaseHandsetLink(const std::string&) {}
+bool Config::isHspDisabled() { return false; }
+bool Config::earlyHspRelease() { return true; }
+ConnectionStrategy Config::getConnectionStrategy() { return ConnectionStrategy::PHONE_FIRST; }
+
 // --- Wire format helpers (mirror SendMessage/ReadMessage framing) -----------
 // Frame: [uint16 bodyLen][uint16 messageId][body...], all network byte order.
 // Scoped so these do not collide with the stub proto classes of the same names

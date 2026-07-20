@@ -3,6 +3,12 @@
 
 EXTRA_CXXFLAGS += $(shell $(PKG_CONFIG) --cflags --libs dbus-cxx-2.0 protobuf-lite)
 
+# Short git hash of the image build (from aawg.mk); becomes the bluetooth
+# name suffix. Unset for builds outside the git tree.
+ifneq ($(AAWG_BUILD_HASH),)
+EXTRA_CXXFLAGS += -DAAWG_BUILD_HASH=\"$(AAWG_BUILD_HASH)\"
+endif
+
 PROTO_FILES = $(wildcard proto/*.proto)
 PROTO_HEADERS = $(PROTO_FILES:proto=pb.h)
 

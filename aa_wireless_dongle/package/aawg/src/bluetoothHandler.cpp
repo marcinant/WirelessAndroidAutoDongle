@@ -5,7 +5,7 @@
 #include "bluetoothProfiles.h"
 #include "bluetoothAdvertisement.h"
 
-static constexpr const char* ADAPTER_ALIAS_PREFIX = "WirelessAADongle-";
+static constexpr const char* ADAPTER_ALIAS_PREFIX = "AudiAndroidAuto-";
 static constexpr const char* ADAPTER_ALIAS_DONGLE_PREFIX = "AndroidAuto-Dongle-";
 
 static constexpr const char* BLUEZ_BUS_NAME = "org.bluez";
