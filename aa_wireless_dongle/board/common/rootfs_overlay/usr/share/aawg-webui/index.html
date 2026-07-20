@@ -31,7 +31,11 @@ h2 { font-size: 15px; margin: 22px 0 8px; color: #aeb8c2; }
 #events .src-h { color: #6aa9e8; }
 #events .src-a { color: #6fd38b; }
 #log { background: #0d0f11; border: 1px solid #2c323a; border-radius: 8px; padding: 10px; height: 320px; overflow-y: scroll; font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all; }
-button, textarea { font: inherit; }
+button, textarea, input { font: inherit; }
+.form { background: #1d2126; border: 1px solid #2c323a; border-radius: 8px; padding: 12px; }
+.form .fr { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.form label { flex: 0 0 60px; }
+.form input { flex: 1; min-width: 200px; background: #0d0f11; color: #dde3e8; border: 1px solid #2c323a; border-radius: 6px; padding: 6px 8px; }
 button { background: #2c5aa0; color: #fff; border: 0; border-radius: 6px; padding: 7px 14px; cursor: pointer; margin-right: 8px; }
 button.sec { background: #2c323a; }
 button.danger { background: #8a3b2e; }
@@ -69,6 +73,18 @@ label { font-size: 13px; color: #7f8b96; }
 
 	<h2>Connection events</h2>
 	<div id="events">no events yet</div>
+
+	<h2>Home Assistant</h2>
+	<div class="form">
+		<div class="fr"><label for="ha_url">URL</label><input id="ha_url" type="text" placeholder="https://example.ui.nabu.casa"></div>
+		<div class="fr"><label for="ha_token">Token</label><input id="ha_token" type="password" placeholder="long-lived access token (HA: profile → security)"></div>
+		<div class="fr"><label for="ha_entity">Entity</label><input id="ha_entity" type="text" placeholder="binary_sensor.car_running"></div>
+		<div class="row">
+			<button id="ha_save">Save</button>
+			<button class="sec" id="ha_test">Test connection</button>
+			<span id="ha_msg"></span>
+		</div>
+	</div>
 
 	<h2>Log</h2>
 	<div id="log"></div>
@@ -284,7 +300,60 @@ function tickEvents() {
 	}).catch(function () {});
 }
 
-tick(); tickLog(); loadConf(); tickEvents(); tickStats();
+// --- Home Assistant settings (ha.cgi) ---
+
+function haMsg(text) { document.getElementById("ha_msg").textContent = text; }
+
+function haField(id) { return document.getElementById(id).value.trim(); }
+
+function loadHA() {
+	fetch("/cgi-bin/ha.cgi").then(function (r) { return r.json(); }).then(function (j) {
+		document.getElementById("ha_url").value = j.url || "";
+		document.getElementById("ha_token").value = j.token || "";
+		document.getElementById("ha_entity").value = j.entity || "";
+	}).catch(function () {});
+}
+
+function haPost(action) {
+	var body = "action=" + action + "\nurl=" + haField("ha_url") +
+		"\ntoken=" + haField("ha_token") + "\nentity=" + haField("ha_entity");
+	return fetch("/cgi-bin/ha.cgi", { method: "POST", headers: { "Content-Type": "text/plain" }, body: body })
+		.then(function (r) { return r.json(); });
+}
+
+document.getElementById("ha_save").onclick = function () {
+	var btn = this;
+	btn.disabled = true; haMsg("saving...");
+	haPost("save")
+		.then(function (j) { haMsg(j.ok ? j.note : ("error: " + j.error)); })
+		.catch(function (e) { haMsg("error: " + e); })
+		.then(function () { btn.disabled = false; });
+};
+
+document.getElementById("ha_test").onclick = function () {
+	var btn = this, url = haField("ha_url"), token = haField("ha_token");
+	if (!url || !token) { haMsg("enter URL and token first"); return; }
+	btn.disabled = true; haMsg("testing from this phone...");
+	// First try directly from the browser - the phone has internet over LTE
+	// even while on the dongle wifi. HA blocks cross-origin requests unless
+	// cors_allowed_origins is configured, so fall back to testing from the
+	// dongle itself (works when the PAN uplink is up).
+	fetch(url.replace(/\/$/, "") + "/api/", { headers: { "Authorization": "Bearer " + token } })
+		.then(function (r) {
+			if (r.status === 200) haMsg("OK: connected, token accepted (checked from phone)");
+			else if (r.status === 401 || r.status === 403) haMsg("error: token rejected (HTTP " + r.status + ")");
+			else haMsg("error: HA answered HTTP " + r.status);
+		})
+		.catch(function () {
+			haMsg("phone-side check blocked (CORS), testing from dongle...");
+			return haPost("test").then(function (j) {
+				haMsg(j.ok ? "OK: " + j.note : ("error: " + j.error + (j.hint ? " — " + j.hint : "")));
+			}).catch(function (e) { haMsg("error: " + e); });
+		})
+		.then(function () { btn.disabled = false; });
+};
+
+tick(); tickLog(); loadConf(); tickEvents(); tickStats(); loadHA();
 setInterval(tick, 2000);
 setInterval(tickLog, 3000);
 setInterval(tickStats, 3000);
