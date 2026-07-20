@@ -17,6 +17,14 @@ ALL_HEADERS = $(wildcard *.h) $(PROTO_HEADERS)
 aawgd: aawgd.o bluetoothHandler.o bluetoothProfiles.o bluetoothAdvertisement.o proxyHandler.o uevent.o usb.o common.o proto/WifiInfoResponse.pb.o proto/WifiStartRequest.pb.o
 	$(CXX) $(CXXFLAGS) $(EXTRA_CXXFLAGS) -o '$@' $^
 
+# Standalone OBD-II logger (raw RFCOMM to a Bluetooth ELM327). Independent of
+# aawgd; links only libbluetooth for the RFCOMM socket helpers.
+aawg-obd: obd/aawg-obd.o
+	$(CXX) $(CXXFLAGS) -o '$@' $^ -lbluetooth
+
+obd/aawg-obd.o: obd/aawg-obd.cpp
+	$(CXX) $(CXXFLAGS) -c -o '$@' '$<'
+
 %.o: %.cpp
 %.o: %.cpp $(ALL_HEADERS)
 	$(CXX) $(CXXFLAGS) $(EXTRA_CXXFLAGS) -c -o '$@' '$<'
@@ -28,4 +36,4 @@ proto/%.pb.cc proto/%.pb.h: proto/%.proto
 	cd $(<D) && $(PROTOC) --cpp_out=. $*.proto
 
 clean:
-	-rm aawgd
+	-rm aawgd aawg-obd obd/aawg-obd.o

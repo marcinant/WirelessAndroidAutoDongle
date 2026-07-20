@@ -149,6 +149,24 @@ push() {
 		fi
 	fi
 
+	# OBD snapshot -> Home Assistant sensors (written by aawg-obd).
+	OBD_LATEST=/persist/aawg/obd-latest
+	if [ -n "${AAWG_HA_URL:-}" ] && [ -n "${AAWG_HA_TOKEN:-}" ] && [ -s "$OBD_LATEST" ]; then
+		# Only push a reasonably fresh snapshot (adapter connected within ~2 min).
+		obd_epoch=$(sed -n 's/^epoch=//p' "$OBD_LATEST")
+		if [ -n "$obd_epoch" ] && [ $(( $(date +%s) - obd_epoch )) -lt 120 ]; then
+			prefix="${AAWG_OBD_HA_PREFIX:-sensor.car}"
+			while IFS='=' read -r k v; do
+				[ "$k" = "epoch" ] && continue
+				[ -z "$k" ] && continue
+				entity="${prefix}_${k}"
+				body="{\"state\":\"$v\",\"attributes\":{\"friendly_name\":\"Car $k\",\"reported_at\":\"$ts\"}}"
+				post_json "${AAWG_HA_URL%/}/api/states/$entity" "$body" "$AAWG_HA_TOKEN" || ok=0
+			done < "$OBD_LATEST"
+			log "pushed OBD snapshot to Home Assistant"
+		fi
+	fi
+
 	[ $ok = 1 ]
 }
 
