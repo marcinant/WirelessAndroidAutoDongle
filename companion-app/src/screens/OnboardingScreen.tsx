@@ -7,84 +7,75 @@ import { RootStackParamList } from '../nav';
 import { colors, space } from '../theme/theme';
 import { Card, Button, Field, SectionTitle } from '../components/ui';
 import { requestOnboardingPermissions } from '../onboarding/permissions';
-import { bluetoothReady, scanForDongle, FoundDongle, destroyBle } from '../onboarding/ble';
 import { pairingSupported, pairDongle, openBluetoothSettings } from '../onboarding/pairing';
 import { joinDongleWifi } from '../onboarding/wifi';
 import {
   DEFAULT_SSID,
   DEFAULT_WIFI_PASSWORD,
-  BT_NAME_PREFIX,
+  DONGLE_NAME_PATTERN,
   saveDongle,
 } from '../onboarding/store';
 import { ping, setWebuiPassword } from '../api/client';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Onboarding'>;
 
-type Step = 'intro' | 'scanning' | 'found' | 'pairing' | 'wifi' | 'connecting';
+type Step = 'intro' | 'pairing' | 'wifi' | 'connecting';
 
 // Guided setup that solves the chicken-and-egg problem of the web UI: the panel
 // at 10.0.0.1 is only reachable once the phone has joined the dongle wifi, and
-// a fresh user has no way in. Here the app: (1) finds the dongle by its BLE
-// beacon, (2) pairs bluetooth via the system dialog, (3) joins the AP with the
-// provisioning password, (4) verifies it can reach the dongle, then saves it.
+// a fresh user has no way in.
+//
+// The dongle is a CLASSIC bluetooth device (RFCOMM profiles for Android Auto).
+// Discovery + pairing therefore go through the system association dialog
+// (CompanionDeviceManager), which runs a classic inquiry — a BLE scan does not
+// see it. After pairing, the app joins the AP and verifies it can reach the
+// dongle before saving it.
 export default function OnboardingScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const [step, setStep] = React.useState<Step>('intro');
-  const [found, setFound] = React.useState<FoundDongle | null>(null);
   const [ssid, setSsid] = React.useState(DEFAULT_SSID);
   const [wifiPass, setWifiPass] = React.useState(DEFAULT_WIFI_PASSWORD);
   const [webuiPass, setWebuiPass] = React.useState('');
   const [status, setStatus] = React.useState('');
+  const btName = React.useRef<string | null>(null);
   const btMac = React.useRef<string | null>(null);
 
-  React.useEffect(() => () => destroyBle(), []);
-
-  async function startScan() {
+  async function findAndPair() {
     setStatus('');
     const granted = await requestOnboardingPermissions();
     if (!granted) {
-      Alert.alert('Permissions needed', 'Bluetooth and location are required to find the dongle.');
+      Alert.alert('Permissions needed', 'Bluetooth (and location) are required to find the dongle.');
       return;
     }
-    if (!(await bluetoothReady())) {
-      Alert.alert('Bluetooth off', 'Turn on Bluetooth, then try again.');
-      return;
-    }
-    setStep('scanning');
-    try {
-      const dongle = await scanForDongle(12000, d => setFound(d));
-      if (dongle) {
-        setFound(dongle);
-        setStep('found');
-      } else {
-        setStep('intro');
-        Alert.alert(
-          'No dongle found',
-          'Make sure the dongle is powered (plug it into the car or a USB power bank) and within a few metres.',
-        );
-      }
-    } catch (e: any) {
-      setStep('intro');
-      Alert.alert('Scan failed', String(e?.message ?? e));
-    }
-  }
 
-  async function pair() {
     setStep('pairing');
-    try {
-      if (await pairingSupported()) {
-        const res = await pairDongle(BT_NAME_PREFIX);
-        btMac.current = res.mac;
-        setStatus(`Paired ${res.name}`);
-      } else {
-        // Fall back to the system bluetooth screen; AA pairs over classic BT.
-        await openBluetoothSettings();
-        setStatus('Pair the dongle in Bluetooth settings, then come back.');
-      }
-    } catch (e: any) {
-      setStatus(`Pairing skipped: ${String(e?.message ?? e)}`);
+    if (!(await pairingSupported())) {
+      // No CompanionDeviceManager: send the user to system bluetooth to pair
+      // manually, then continue to the wifi step.
+      await openBluetoothSettings();
+      setStatus('Pair the dongle in Bluetooth settings, then continue below.');
+      setStep('wifi');
+      return;
     }
-    setStep('wifi');
+
+    try {
+      const res = await pairDongle(DONGLE_NAME_PATTERN);
+      btName.current = res.name || null;
+      btMac.current = res.mac || null;
+      setStatus(`Paired ${res.name || 'dongle'}`);
+      setStep('wifi');
+    } catch (e: any) {
+      const msg = String(e?.message ?? e);
+      if (msg.includes('cancelled')) {
+        setStep('intro');
+        return;
+      }
+      // Association can fail on some OEMs; offer the manual route.
+      Alert.alert('Pairing dialog failed', msg, [
+        { text: 'Open Bluetooth settings', onPress: () => openBluetoothSettings() },
+        { text: 'Continue anyway', onPress: () => setStep('wifi') },
+      ]);
+    }
   }
 
   async function connect() {
@@ -100,7 +91,6 @@ export default function OnboardingScreen({ navigation }: Props) {
 
     setWebuiPassword(webuiPass || null);
     setStatus('Checking the connection…');
-    // The AP binding can take a moment; retry the reachability probe.
     let ok = false;
     for (let i = 0; i < 6 && !ok; i++) {
       ok = await ping(3000);
@@ -119,7 +109,7 @@ export default function OnboardingScreen({ navigation }: Props) {
       ssid,
       wifiPassword: wifiPass,
       webuiPassword: webuiPass || null,
-      btName: found?.name ?? null,
+      btName: btName.current,
       btMac: btMac.current,
     };
     await saveDongle(dongle);
@@ -134,31 +124,20 @@ export default function OnboardingScreen({ navigation }: Props) {
         <Card>
           <SectionTitle>Find your dongle</SectionTitle>
           <Text style={styles.p}>
-            Power the dongle (plug it into the car, or a USB power bank on your desk). The app will
-            detect it over Bluetooth.
+            Power the dongle (plug it into the car, or a USB power bank on your desk). Tap below —
+            Android will list nearby Bluetooth devices; pick the dongle to pair it.
           </Text>
-          <Button title="Scan for dongle" onPress={startScan} />
+          <Button title="Find & pair dongle" onPress={findAndPair} />
         </Card>
       )}
 
-      {step === 'scanning' && (
+      {step === 'pairing' && (
         <Card>
-          <SectionTitle>Scanning…</SectionTitle>
+          <SectionTitle>Pairing…</SectionTitle>
           <Text style={styles.p}>
-            Looking for “{BT_NAME_PREFIX}…”. {found ? `Seen: ${found.name}` : 'Keep the dongle close.'}
+            Choose the dongle in the system dialog (its name starts with “AudiAndroidAuto-”). If it
+            is not listed, make sure it is powered and nearby.
           </Text>
-        </Card>
-      )}
-
-      {(step === 'found' || step === 'pairing') && found && (
-        <Card>
-          <SectionTitle>Dongle found</SectionTitle>
-          <Text style={styles.name}>{found.name}</Text>
-          <Text style={styles.p}>
-            Signal {found.rssi ?? '–'} dBm. Next, pair Bluetooth so the dongle can wake wireless
-            Android Auto.
-          </Text>
-          <Button title="Pair Bluetooth" onPress={pair} loading={step === 'pairing'} />
         </Card>
       )}
 
@@ -175,11 +154,7 @@ export default function OnboardingScreen({ navigation }: Props) {
             secure
             placeholder="only if you set AAWG_WEBUI_PASSWORD"
           />
-          <Button
-            title="Connect"
-            onPress={connect}
-            loading={step === 'connecting'}
-          />
+          <Button title="Connect" onPress={connect} loading={step === 'connecting'} />
         </Card>
       )}
 
@@ -194,7 +169,6 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   content: { padding: space.lg },
   p: { color: colors.textMid, fontSize: 14, lineHeight: 20, marginBottom: space.md },
-  name: { color: colors.ok, fontSize: 18, fontWeight: '600', marginBottom: space.xs },
   status: { color: colors.warn, fontSize: 13, marginBottom: space.sm },
   hint: { color: colors.textDim, fontSize: 12, marginTop: space.lg, textAlign: 'center' },
 });

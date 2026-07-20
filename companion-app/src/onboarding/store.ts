@@ -30,3 +30,7 @@ export async function clearDongle(): Promise<void> {
 export const DEFAULT_SSID = 'AAWirelessDongle';
 export const DEFAULT_WIFI_PASSWORD = 'ConnectAAWirelessDongle';
 export const BT_NAME_PREFIX = 'AudiAndroidAuto-';
+
+// Classic-BT name regex for the pairing dialog. Matches this build's name and
+// the upstream defaults, so it finds a dongle on any firmware version.
+export const DONGLE_NAME_PATTERN = '(AudiAndroidAuto|WirelessAADongle|AndroidAuto-Dongle)-.*';

@@ -24,10 +24,11 @@ export async function pairingSupported(): Promise<boolean> {
   }
 }
 
-// Show the system association dialog for "AudiAndroidAuto-*" and bond the pick.
-export async function pairDongle(namePrefix: string): Promise<PairResult> {
+// Show the system association dialog (classic BT inquiry) filtered by a name
+// regex, and bond the picked device. Pass '' to list every bondable device.
+export async function pairDongle(namePattern: string): Promise<PairResult> {
   if (!native) throw new Error('pairing module unavailable');
-  return native.associate(namePrefix);
+  return native.associate(namePattern);
 }
 
 export async function openBluetoothSettings(): Promise<void> {

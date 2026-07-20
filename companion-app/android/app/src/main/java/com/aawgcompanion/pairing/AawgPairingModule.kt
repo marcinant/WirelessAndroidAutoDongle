@@ -89,9 +89,12 @@ class AawgPairingModule(private val reactCtx: ReactApplicationContext) :
   }
 
   // Show the association dialog for devices whose bluetooth name matches the
-  // prefix. Resolves with { name, mac } once the user picks and bonding starts.
+  // given regex (partial match). This runs a CLASSIC bluetooth inquiry — the
+  // dongle is a classic BR/EDR device (RFCOMM profiles for Android Auto), so
+  // this is what actually finds it; a BLE scan does not. Resolves with
+  // { name, mac } once the user picks and bonding starts.
   @ReactMethod
-  fun associate(namePrefix: String, promise: Promise) {
+  fun associate(namePattern: String, promise: Promise) {
     val activity = reactCtx.currentActivity
     if (activity == null) {
       promise.reject("no_activity", "No foreground activity")
@@ -105,16 +108,19 @@ class AawgPairingModule(private val reactCtx: ReactApplicationContext) :
 
     pendingPromise = promise
 
-    val deviceFilter =
-      BluetoothDeviceFilter.Builder()
-        .setNamePattern(Pattern.compile(Pattern.quote(namePrefix) + ".*"))
-        .build()
-
-    val request =
-      AssociationRequest.Builder()
-        .addDeviceFilter(deviceFilter)
-        .setSingleDevice(false)
-        .build()
+    // An empty pattern means "show every bondable device" (fallback when the
+    // dongle's name is unknown); otherwise filter by the caller's regex.
+    val builder = AssociationRequest.Builder().setSingleDevice(false)
+    if (namePattern.isNotEmpty()) {
+      builder.addDeviceFilter(
+        BluetoothDeviceFilter.Builder()
+          .setNamePattern(Pattern.compile(namePattern))
+          .build(),
+      )
+    } else {
+      builder.addDeviceFilter(BluetoothDeviceFilter.Builder().build())
+    }
+    val request = builder.build()
 
     val callback =
       object : CompanionDeviceManager.Callback() {
