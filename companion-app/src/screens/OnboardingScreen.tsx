@@ -9,12 +9,7 @@ import { Card, Button, Field, SectionTitle } from '../components/ui';
 import { requestOnboardingPermissions } from '../onboarding/permissions';
 import { pairingSupported, pairDongle, openBluetoothSettings } from '../onboarding/pairing';
 import { joinDongleWifi } from '../onboarding/wifi';
-import {
-  DEFAULT_SSID,
-  DEFAULT_WIFI_PASSWORD,
-  DONGLE_NAME_PATTERN,
-  saveDongle,
-} from '../onboarding/store';
+import { DEFAULT_SSID, DEFAULT_WIFI_PASSWORD, saveDongle } from '../onboarding/store';
 import { ping, setWebuiPassword } from '../api/client';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Onboarding'>;
@@ -59,7 +54,11 @@ export default function OnboardingScreen({ navigation }: Props) {
     }
 
     try {
-      const res = await pairDongle(DONGLE_NAME_PATTERN);
+      // Empty filter: list every discoverable BT device. A name filter hides
+      // the dongle when its inquiry name isn't resolved in time, even though it
+      // is clearly discoverable (it shows in system Settings). The user picks
+      // the entry named "AudiAndroidAuto-…" / "WirelessAADongle-…".
+      const res = await pairDongle('');
       btName.current = res.name || null;
       btMac.current = res.mac || null;
       setStatus(`Paired ${res.name || 'dongle'}`);
@@ -128,6 +127,15 @@ export default function OnboardingScreen({ navigation }: Props) {
             Android will list nearby Bluetooth devices; pick the dongle to pair it.
           </Text>
           <Button title="Find & pair dongle" onPress={findAndPair} />
+          <Button
+            title="Pair in Bluetooth settings instead"
+            kind="secondary"
+            onPress={async () => {
+              await openBluetoothSettings();
+              setStatus('Pair the dongle in Bluetooth settings, then continue below.');
+              setStep('wifi');
+            }}
+          />
         </Card>
       )}
 
@@ -135,8 +143,9 @@ export default function OnboardingScreen({ navigation }: Props) {
         <Card>
           <SectionTitle>Pairing…</SectionTitle>
           <Text style={styles.p}>
-            Choose the dongle in the system dialog (its name starts with “AudiAndroidAuto-”). If it
-            is not listed, make sure it is powered and nearby.
+            In the system dialog, pick the device named “AudiAndroidAuto-…” (or “WirelessAADongle-…”
+            on older firmware). The list may take a few seconds to fill; if the dongle is missing,
+            make sure it is powered and nearby.
           </Text>
         </Card>
       )}
