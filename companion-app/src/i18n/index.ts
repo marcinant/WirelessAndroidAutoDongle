@@ -196,6 +196,18 @@ const STRINGS: Record<string, Entry> = {
   'obd.alert.voltage': { en: 'Low system voltage: {v} V (battery/charging?)', pl: 'Niskie napięcie: {v} V (akumulator/ładowanie?)' },
   'obd.alert.trim': { en: 'Fuel trim off by {v}% (possible leak/sensor)', pl: 'Korekta paliwa odchylona o {v}% (możliwy nieszczelność/czujnik)' },
 
+  // Traccar trip tracking
+  'trk.title': { en: 'Traccar tracking', pl: 'Śledzenie Traccar' },
+  'trk.help': { en: "Send the phone's GPS position plus engine data to a Traccar server (OsmAnd protocol). Add a device in Traccar with the identifier below. Keeps running in the background during the drive.", pl: 'Wysyła pozycję GPS telefonu i dane silnika na serwer Traccar (protokół OsmAnd). Dodaj urządzenie w Traccar z poniższym identyfikatorem. Działa w tle podczas jazdy.' },
+  'trk.url': { en: 'Traccar URL (OsmAnd port, e.g. :5055)', pl: 'URL Traccar (port OsmAnd, np. :5055)' },
+  'trk.id': { en: 'Device identifier', pl: 'Identyfikator urządzenia' },
+  'trk.interval': { en: 'Send interval (s)', pl: 'Interwał wysyłki (s)' },
+  'trk.start': { en: 'Start tracking', pl: 'Start śledzenia' },
+  'trk.stop': { en: 'Stop tracking', pl: 'Stop śledzenia' },
+  'trk.status': { en: 'tracking · {n} sent', pl: 'śledzenie · wysłano {n}' },
+  'trk.need': { en: 'Enter the Traccar URL and device id first.', pl: 'Najpierw podaj URL Traccar i id urządzenia.' },
+  'trk.needloc': { en: 'Location permission is required for tracking.', pl: 'Śledzenie wymaga uprawnienia lokalizacji.' },
+
   // Logs
   'log.loading': { en: 'loading…', pl: 'wczytywanie…' },
   'log.pause': { en: 'Pause', pl: 'Wstrzymaj' },

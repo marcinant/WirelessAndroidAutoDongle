@@ -12,8 +12,15 @@ export interface ObdHaConfig {
   prefix: string; // entity id prefix, e.g. "sensor.car"
 }
 
+export interface TraccarStore {
+  url: string;
+  deviceId: string;
+  intervalS: string;
+}
+
 const ADAPTER_KEY = 'aawg.obd.adapter';
 const HA_KEY = 'aawg.obd.ha';
+const TRACCAR_KEY = 'aawg.obd.traccar';
 
 export async function loadAdapter(): Promise<ObdAdapter | null> {
   const raw = await AsyncStorage.getItem(ADAPTER_KEY);
@@ -32,4 +39,12 @@ export async function loadObdHa(): Promise<ObdHaConfig> {
 }
 export async function saveObdHa(c: ObdHaConfig): Promise<void> {
   await AsyncStorage.setItem(HA_KEY, JSON.stringify(c));
+}
+
+export async function loadTraccar(): Promise<TraccarStore> {
+  const raw = await AsyncStorage.getItem(TRACCAR_KEY);
+  return raw ? (JSON.parse(raw) as TraccarStore) : { url: '', deviceId: '', intervalS: '15' };
+}
+export async function saveTraccar(c: TraccarStore): Promise<void> {
+  await AsyncStorage.setItem(TRACCAR_KEY, JSON.stringify(c));
 }

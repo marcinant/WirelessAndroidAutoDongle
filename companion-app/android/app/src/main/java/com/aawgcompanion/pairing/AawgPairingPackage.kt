@@ -7,7 +7,12 @@ import com.facebook.react.uimanager.ViewManager
 
 class AawgPairingPackage : ReactPackage {
   override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> =
-    listOf(AawgPairingModule(reactContext), AawgObdModule(reactContext))
+    listOf(
+      AawgPairingModule(reactContext),
+      AawgObdModule(reactContext),
+      AawgLocationModule(reactContext),
+      AawgForegroundModule(reactContext),
+    )
 
   override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> =
     emptyList()
