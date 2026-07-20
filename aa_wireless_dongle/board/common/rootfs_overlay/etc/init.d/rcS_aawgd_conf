@@ -12,8 +12,18 @@ fi
 
 
 ## Setup Wifi password
+## When the user has not pinned AAWG_WIFI_PASSWORD, generate one ONCE and keep
+## it on the persist partition. A stable per-device password (rather than a
+## fresh random one every boot) lets the companion app and previously-joined
+## devices reconnect without re-reading it, while staying unique per dongle.
+## Delete /persist/wifi-password to roll a new one.
 if [ -z "${AAWG_WIFI_PASSWORD}" ]; then
-	export AAWG_WIFI_PASSWORD="$(cat /dev/urandom | tr -dc 'A-Za-z0-9@#' | head -c 16)"
+	PERSIST_PW=/persist/wifi-password
+	if [ ! -s "$PERSIST_PW" ]; then
+		mkdir -p /persist
+		cat /dev/urandom | tr -dc 'A-Za-z0-9@#' | head -c 16 > "$PERSIST_PW"
+	fi
+	export AAWG_WIFI_PASSWORD="$(cat "$PERSIST_PW")"
 fi
 
 set +o allexport
