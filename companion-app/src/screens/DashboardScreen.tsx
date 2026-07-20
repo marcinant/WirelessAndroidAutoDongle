@@ -11,6 +11,7 @@ import { t } from '../i18n';
 import { usePolling } from '../hooks/usePolling';
 import { getStatus, getStats, getEvents, setWebuiPassword } from '../api/client';
 import { fmtUptime, parseWifiStations, parseBtDevices } from '../api/parse';
+import { joinDongleWifi } from '../onboarding/wifi';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Dashboard'>;
 
@@ -18,9 +19,22 @@ export default function DashboardScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
   const dongle = route.params.dongle;
 
+  const [connecting, setConnecting] = React.useState(false);
+
   React.useEffect(() => {
     setWebuiPassword(dongle.webuiPassword);
   }, [dongle.webuiPassword]);
+
+  async function connectWifi() {
+    setConnecting(true);
+    try {
+      await joinDongleWifi(dongle.ssid, dongle.wifiPassword);
+    } catch {
+      // surfaced via the still-offline banner
+    } finally {
+      setConnecting(false);
+    }
+  }
 
   const status = usePolling(getStatus, 2000);
   const stats = usePolling(getStats, 3000);
@@ -62,6 +76,7 @@ export default function DashboardScreen({ navigation, route }: Props) {
       {stale && (
         <Card style={styles.offline}>
           <Text style={styles.offlineText}>{t('dash.offline', { ssid: dongle.ssid })}</Text>
+          <Button title={t('dev.connect')} onPress={connectWifi} loading={connecting} />
         </Card>
       )}
 

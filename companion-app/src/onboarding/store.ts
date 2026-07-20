@@ -1,7 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Remembered dongle so returning users skip straight to the dashboard.
+// A dongle the user has set up. Identified by `id` (its bonded BT MAC when
+// known, else a synthesised id) so multiple dongles can be stored side by side.
 export interface SavedDongle {
+  id: string;
+  label: string; // user-facing name, defaults to btName or ssid
   ssid: string;
   wifiPassword: string;
   webuiPassword: string | null;
@@ -9,28 +12,79 @@ export interface SavedDongle {
   btMac: string | null;
 }
 
-const KEY = 'aawg.dongle';
+const LIST_KEY = 'aawg.dongles';
+const LEGACY_KEY = 'aawg.dongle';
 
-export async function loadDongle(): Promise<SavedDongle | null> {
-  const raw = await AsyncStorage.getItem(KEY);
-  return raw ? (JSON.parse(raw) as SavedDongle) : null;
+function makeId(d: { btMac: string | null; ssid: string }): string {
+  return d.btMac || `${d.ssid}-${Date.now()}`;
 }
 
-export async function saveDongle(d: SavedDongle): Promise<void> {
-  await AsyncStorage.setItem(KEY, JSON.stringify(d));
+export async function loadDongles(): Promise<SavedDongle[]> {
+  const raw = await AsyncStorage.getItem(LIST_KEY);
+  if (raw) return JSON.parse(raw) as SavedDongle[];
+
+  // One-time migration from the old single-dongle key.
+  const legacy = await AsyncStorage.getItem(LEGACY_KEY);
+  if (legacy) {
+    const d = JSON.parse(legacy);
+    const migrated: SavedDongle = {
+      id: makeId(d),
+      label: d.btName || d.ssid,
+      ssid: d.ssid,
+      wifiPassword: d.wifiPassword,
+      webuiPassword: d.webuiPassword ?? null,
+      btName: d.btName ?? null,
+      btMac: d.btMac ?? null,
+    };
+    await AsyncStorage.setItem(LIST_KEY, JSON.stringify([migrated]));
+    await AsyncStorage.removeItem(LEGACY_KEY);
+    return [migrated];
+  }
+  return [];
 }
 
-export async function clearDongle(): Promise<void> {
-  await AsyncStorage.removeItem(KEY);
+async function saveList(list: SavedDongle[]): Promise<void> {
+  await AsyncStorage.setItem(LIST_KEY, JSON.stringify(list));
+}
+
+// Add or update a dongle (matched by id). Returns the new list.
+export async function upsertDongle(
+  d: Omit<SavedDongle, 'id' | 'label'> & { id?: string; label?: string },
+): Promise<SavedDongle[]> {
+  const list = await loadDongles();
+  const id = d.id || makeId(d);
+  const label = d.label || d.btName || d.ssid;
+  const entry: SavedDongle = {
+    id,
+    label,
+    ssid: d.ssid,
+    wifiPassword: d.wifiPassword,
+    webuiPassword: d.webuiPassword,
+    btName: d.btName,
+    btMac: d.btMac,
+  };
+  const idx = list.findIndex(x => x.id === id);
+  if (idx >= 0) list[idx] = entry;
+  else list.push(entry);
+  await saveList(list);
+  return list;
+}
+
+export async function removeDongle(id: string): Promise<SavedDongle[]> {
+  const list = (await loadDongles()).filter(d => d.id !== id);
+  await saveList(list);
+  return list;
+}
+
+export async function renameDongle(id: string, label: string): Promise<SavedDongle[]> {
+  const list = await loadDongles();
+  const d = list.find(x => x.id === id);
+  if (d) d.label = label;
+  await saveList(list);
+  return list;
 }
 
 // The stock image ships with these AP defaults (board/common/rootfs_overlay).
-// The wifi password is a fixed provisioning default so the app can join
-// out of the box; users are prompted to change it during setup.
 export const DEFAULT_SSID = 'AAWirelessDongle';
 export const DEFAULT_WIFI_PASSWORD = 'ConnectAAWirelessDongle';
 export const BT_NAME_PREFIX = 'AudiAndroidAuto-';
-
-// Classic-BT name regex for the pairing dialog. Matches this build's name and
-// the upstream defaults, so it finds a dongle on any firmware version.
-export const DONGLE_NAME_PATTERN = '(AudiAndroidAuto|WirelessAADongle|AndroidAuto-Dongle)-.*';

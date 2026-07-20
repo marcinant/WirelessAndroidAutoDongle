@@ -13,9 +13,10 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import { RootStackParamList } from './src/nav';
 import { colors } from './src/theme/theme';
-import { loadDongle, SavedDongle } from './src/onboarding/store';
+import { loadDongles } from './src/onboarding/store';
 import { t } from './src/i18n';
 import OnboardingScreen from './src/screens/OnboardingScreen';
+import DevicesScreen from './src/screens/DevicesScreen';
 import DashboardScreen from './src/screens/DashboardScreen';
 import ConfigScreen from './src/screens/ConfigScreen';
 import LogsScreen from './src/screens/LogsScreen';
@@ -37,11 +38,11 @@ const navTheme = {
 
 function App(): React.JSX.Element {
   const [ready, setReady] = React.useState(false);
-  const [saved, setSaved] = React.useState<SavedDongle | null>(null);
+  const [hasDongles, setHasDongles] = React.useState(false);
 
   React.useEffect(() => {
-    loadDongle()
-      .then(setSaved)
+    loadDongles()
+      .then(list => setHasDongles(list.length > 0))
       .finally(() => setReady(true));
   }, []);
 
@@ -55,12 +56,13 @@ function App(): React.JSX.Element {
       ) : (
         <NavigationContainer theme={navTheme}>
           <Stack.Navigator
-            initialRouteName={saved ? 'Dashboard' : 'Onboarding'}
+            initialRouteName={hasDongles ? 'Devices' : 'Onboarding'}
             screenOptions={{
               headerStyle: { backgroundColor: colors.card },
               headerTintColor: colors.text,
               contentStyle: { backgroundColor: colors.bg },
             }}>
+            <Stack.Screen name="Devices" component={DevicesScreen} options={{ title: t('title.devices') }} />
             <Stack.Screen
               name="Onboarding"
               component={OnboardingScreen}
@@ -70,7 +72,6 @@ function App(): React.JSX.Element {
               name="Dashboard"
               component={DashboardScreen}
               options={{ title: t('title.dashboard') }}
-              initialParams={saved ? { dongle: saved } : undefined}
             />
             <Stack.Screen name="Config" component={ConfigScreen} options={{ title: t('title.settings') }} />
             <Stack.Screen name="Logs" component={LogsScreen} options={{ title: t('title.log') }} />

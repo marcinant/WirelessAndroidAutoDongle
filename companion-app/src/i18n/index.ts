@@ -29,10 +29,26 @@ type Entry = Record<Lang, string>;
 
 const STRINGS: Record<string, Entry> = {
   // Screen titles
+  'title.devices': { en: 'My dongles', pl: 'Moje dongle' },
   'title.setup': { en: 'Set up dongle', pl: 'Konfiguracja dongla' },
   'title.dashboard': { en: 'AA Dongle', pl: 'Dongle AA' },
   'title.settings': { en: 'Settings', pl: 'Ustawienia' },
   'title.log': { en: 'Log', pl: 'Dziennik' },
+
+  // Devices manager
+  'dev.title': { en: 'Paired dongles', pl: 'Sparowane dongle' },
+  'dev.empty': { en: 'No dongles yet. Add one below.', pl: 'Brak dongli. Dodaj poniżej.' },
+  'dev.add': { en: 'Add dongle', pl: 'Dodaj dongle' },
+  'dev.open': { en: 'Open', pl: 'Otwórz' },
+  'dev.connect': { en: 'Connect', pl: 'Połącz' },
+  'dev.disconnect': { en: 'Disconnect', pl: 'Rozłącz' },
+  'dev.repair': { en: 'Re-pair', pl: 'Sparuj ponownie' },
+  'dev.forget': { en: 'Forget', pl: 'Zapomnij' },
+  'dev.forget.title': { en: 'Forget dongle', pl: 'Zapomnij dongle' },
+  'dev.forget.body': { en: 'Remove {name} from the app? Bluetooth pairing on the phone is kept.', pl: 'Usunąć {name} z aplikacji? Parowanie Bluetooth w telefonie zostaje.' },
+  'dev.forget.confirm': { en: 'Forget', pl: 'Zapomnij' },
+  'dev.repaired.title': { en: 'Paired', pl: 'Sparowano' },
+  'dev.repaired.body': { en: '{name} is bonded again.', pl: '{name} ponownie sparowany.' },
 
   // Onboarding
   'ob.find.title': { en: 'Find your dongle', pl: 'Znajdź dongle' },

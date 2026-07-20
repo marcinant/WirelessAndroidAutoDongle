@@ -19,7 +19,7 @@ import {
   FoundDevice,
 } from '../onboarding/pairing';
 import { joinDongleWifi } from '../onboarding/wifi';
-import { DEFAULT_SSID, DEFAULT_WIFI_PASSWORD, saveDongle } from '../onboarding/store';
+import { DEFAULT_SSID, DEFAULT_WIFI_PASSWORD, upsertDongle } from '../onboarding/store';
 import { ping, setWebuiPassword } from '../api/client';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Onboarding'>;
@@ -126,8 +126,12 @@ export default function OnboardingScreen({ navigation }: Props) {
       btName: btName.current,
       btMac: btMac.current,
     };
-    await saveDongle(dongle);
-    navigation.reset({ index: 0, routes: [{ name: 'Dashboard', params: { dongle } }] });
+    const list = await upsertDongle(dongle);
+    const saved = list.find(d => d.btMac === btMac.current) ?? list[list.length - 1];
+    navigation.reset({
+      index: 1,
+      routes: [{ name: 'Devices' }, { name: 'Dashboard', params: { dongle: saved } }],
+    });
   }
 
   const sorted = Object.values(devices).sort((a, b) => {
