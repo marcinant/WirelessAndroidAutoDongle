@@ -1,31 +1,35 @@
 // ELM327 session: init handshake, PID polling, and rule-based health checks.
+// Runs over whichever transport is active (Bluetooth, TCP, or the built-in
+// demo simulator) — see transport.ts.
 
-import { obdConnect, obdCommand, obdDisconnect } from './native';
+import { getTransport } from './transport';
 import { PIDS, ObdReadings, parseData, fuelPer100km } from './pids';
 
-// Open the serial link and put the ELM327 into a clean, quiet state:
+// Open the link and put the ELM327 into a clean, quiet state:
 // echo off, linefeeds off, headers off, automatic protocol.
-export async function elmConnect(address: string): Promise<void> {
-  await obdConnect(address);
-  await obdCommand('ATZ', 2500); // reset
+export async function elmConnect(target: string): Promise<void> {
+  const t = getTransport();
+  await t.connect(target);
+  await t.command('ATZ', 2500); // reset
   for (const cmd of ['ATE0', 'ATL0', 'ATH0', 'ATSP0']) {
-    await obdCommand(cmd, 1500);
+    await t.command(cmd, 1500);
   }
-  await obdCommand('0100', 3000); // wake the protocol / probe supported PIDs
+  await t.command('0100', 3000); // wake the protocol / probe supported PIDs
 }
 
 export async function elmDisconnect(): Promise<void> {
-  await obdDisconnect();
+  await getTransport().disconnect();
 }
 
 // Poll the given PID keys once, sequentially (the link is a serial line).
 // Unsupported or unanswered PIDs are simply omitted from the result.
 export async function poll(keys: (keyof typeof PIDS)[]): Promise<ObdReadings> {
+  const t = getTransport();
   const out: ObdReadings = {};
   for (const key of keys) {
     const pid = PIDS[key];
     try {
-      const raw = await obdCommand(pid.cmd, 1200);
+      const raw = await t.command(pid.cmd, 1200);
       const bytes = parseData(raw, pid.pid);
       if (bytes) {
         const v = pid.parse(bytes);

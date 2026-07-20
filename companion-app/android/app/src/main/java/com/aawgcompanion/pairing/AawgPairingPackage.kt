@@ -10,6 +10,7 @@ class AawgPairingPackage : ReactPackage {
     listOf(
       AawgPairingModule(reactContext),
       AawgObdModule(reactContext),
+      AawgObdTcpModule(reactContext),
       AawgLocationModule(reactContext),
       AawgForegroundModule(reactContext),
     )

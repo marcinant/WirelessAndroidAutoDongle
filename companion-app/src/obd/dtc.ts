@@ -1,7 +1,9 @@
 // Diagnostic trouble code (DTC) read/clear over ELM327.
 // Mode 03 returns stored codes as pairs of bytes; mode 04 clears them.
 
-import { obdCommand } from './native';
+import { getTransport } from './transport';
+
+const obdCommand = (cmd: string, timeoutMs?: number) => getTransport().command(cmd, timeoutMs);
 
 // Decode a 2-byte DTC into its "P0301"-style string.
 function decodeDtc(hi: number, lo: number): string {

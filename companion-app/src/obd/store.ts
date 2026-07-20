@@ -18,9 +18,16 @@ export interface TraccarStore {
   intervalS: string;
 }
 
+// Which OBD transport the user works with; 'tcp' keeps its host:port target.
+export interface TransportStore {
+  kind: 'bt' | 'tcp' | 'demo';
+  tcpTarget: string;
+}
+
 const ADAPTER_KEY = 'aawg.obd.adapter';
 const HA_KEY = 'aawg.obd.ha';
 const TRACCAR_KEY = 'aawg.obd.traccar';
+const TRANSPORT_KEY = 'aawg.obd.transport';
 
 export async function loadAdapter(): Promise<ObdAdapter | null> {
   const raw = await AsyncStorage.getItem(ADAPTER_KEY);
@@ -39,6 +46,14 @@ export async function loadObdHa(): Promise<ObdHaConfig> {
 }
 export async function saveObdHa(c: ObdHaConfig): Promise<void> {
   await AsyncStorage.setItem(HA_KEY, JSON.stringify(c));
+}
+
+export async function loadTransport(): Promise<TransportStore> {
+  const raw = await AsyncStorage.getItem(TRANSPORT_KEY);
+  return raw ? (JSON.parse(raw) as TransportStore) : { kind: 'bt', tcpTarget: '192.168.0.10:35000' };
+}
+export async function saveTransport(c: TransportStore): Promise<void> {
+  await AsyncStorage.setItem(TRANSPORT_KEY, JSON.stringify(c));
 }
 
 export async function loadTraccar(): Promise<TraccarStore> {

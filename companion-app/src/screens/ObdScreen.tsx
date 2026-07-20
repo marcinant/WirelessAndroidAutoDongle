@@ -23,8 +23,10 @@ import {
   loadAdapter, saveAdapter, clearAdapter,
   loadObdHa, saveObdHa, ObdHaConfig,
   loadTraccar, saveTraccar, TraccarStore,
+  loadTransport, saveTransport, TransportStore,
   ObdAdapter,
 } from '../obd/store';
+import { setTransport, TransportKind } from '../obd/transport';
 import { pushReadings } from '../obd/haPush';
 import { tracker } from '../track/tracker';
 
@@ -43,6 +45,7 @@ export default function ObdScreen(_props: Props) {
   const [haMsg, setHaMsg] = React.useState('');
   const [tc, setTc] = React.useState<TraccarStore>({ url: '', deviceId: '', intervalS: '15' });
   const [tcMsg, setTcMsg] = React.useState('');
+  const [tr, setTr] = React.useState<TransportStore>({ kind: 'bt', tcpTarget: '192.168.0.10:35000' });
 
   const unsub = React.useRef<() => void>(() => {});
   const pushCounter = React.useRef(0);
@@ -51,6 +54,10 @@ export default function ObdScreen(_props: Props) {
     loadAdapter().then(setAdapter);
     loadObdHa().then(setHa);
     loadTraccar().then(setTc);
+    loadTransport().then(v => {
+      setTr(v);
+      setTransport(v.kind);
+    });
     const s1 = obdSession.subscribe(force);
     const s2 = tracker.subscribe(force);
     return () => {
@@ -101,11 +108,21 @@ export default function ObdScreen(_props: Props) {
     setAdapter(a);
   }
 
+  async function switchTransport(kind: TransportKind) {
+    if (obdSession.connected) await obdSession.disconnect();
+    const next = { ...tr, kind };
+    setTr(next);
+    setTransport(kind);
+    await saveTransport(next);
+  }
+
   async function connect() {
-    if (!adapter) return;
+    const target = tr.kind === 'bt' ? adapter?.address : tr.kind === 'tcp' ? tr.tcpTarget : 'demo';
+    if (!target) return;
+    if (tr.kind === 'tcp') await saveTransport(tr);
     setConnecting(true);
     try {
-      await obdSession.connect(adapter.address);
+      await obdSession.connect(target);
     } catch (e: any) {
       Alert.alert(t('obd.connfail'), String(e?.message ?? e));
     } finally {
@@ -192,7 +209,18 @@ export default function ObdScreen(_props: Props) {
     <ScrollView
       style={styles.screen}
       contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + space.xl }]}>
-      {!adapter ? (
+      <View style={styles.segment}>
+        {(['bt', 'tcp', 'demo'] as TransportKind[]).map(k => (
+          <TouchableOpacity
+            key={k}
+            style={[styles.segItem, tr.kind === k && styles.segItemOn]}
+            onPress={() => switchTransport(k)}>
+            <Text style={[styles.segText, tr.kind === k && styles.segTextOn]}>{t(`obd.src.${k}`)}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {tr.kind === 'bt' && !adapter ? (
         <Card>
           <SectionTitle>{t('obd.pick.title')}</SectionTitle>
           <Text style={styles.help}>{t('obd.pick.body')}</Text>
@@ -207,20 +235,34 @@ export default function ObdScreen(_props: Props) {
       ) : (
         <>
           <Card>
-            <View style={styles.rowTop}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.name}>{adapter.name}</Text>
-                <Text style={styles.devMeta}>{adapter.address}</Text>
+            {tr.kind === 'bt' && adapter ? (
+              <View style={styles.rowTop}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.name}>{adapter.name}</Text>
+                  <Text style={styles.devMeta}>{adapter.address}</Text>
+                </View>
+                <View style={[styles.dot, { backgroundColor: connected ? colors.ok : colors.border }]} />
               </View>
-              <View style={[styles.dot, { backgroundColor: connected ? colors.ok : colors.border }]} />
-            </View>
+            ) : tr.kind === 'tcp' ? (
+              <>
+                <Text style={styles.help}>{t('obd.tcp.help')}</Text>
+                <Field
+                  label={t('obd.tcp.target')}
+                  value={tr.tcpTarget}
+                  onChangeText={v => setTr({ ...tr, tcpTarget: v })}
+                  placeholder="192.168.0.10:35000"
+                />
+              </>
+            ) : (
+              <Text style={styles.help}>{t('obd.demo.help')}</Text>
+            )}
             <View style={styles.actions}>
               {connected ? (
                 <Button title={t('obd.disconnect')} kind="secondary" onPress={() => obdSession.disconnect()} />
               ) : (
                 <Button title={t('obd.connect')} loading={connecting} onPress={connect} />
               )}
-              <Button title={t('obd.forget')} kind="danger" onPress={forget} />
+              {tr.kind === 'bt' && adapter && <Button title={t('obd.forget')} kind="danger" onPress={forget} />}
             </View>
           </Card>
 
@@ -317,4 +359,9 @@ const styles = StyleSheet.create({
   dtc: { color: colors.bad, fontSize: 15, fontFamily: 'monospace', paddingVertical: 2 },
   trackOn: { borderColor: colors.ok },
   trackStat: { color: colors.ok, fontSize: 12, marginTop: space.sm },
+  segment: { flexDirection: 'row', marginBottom: space.md, borderRadius: 6, overflow: 'hidden', borderWidth: 1, borderColor: colors.border },
+  segItem: { flex: 1, paddingVertical: 9, alignItems: 'center', backgroundColor: colors.inputBg },
+  segItemOn: { backgroundColor: colors.accent },
+  segText: { color: colors.textMid, fontSize: 13 },
+  segTextOn: { color: '#fff', fontWeight: '600' },
 });
