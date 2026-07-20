@@ -146,6 +146,12 @@ export default function DevicesScreen({ navigation }: Props) {
       <View style={{ marginTop: space.md }}>
         <Button title={t('dev.add')} onPress={() => navigation.navigate('Onboarding', { mode: 'add' })} />
       </View>
+
+      <SectionTitle>{t('obd.section')}</SectionTitle>
+      <Card>
+        <Text style={styles.dim}>{t('obd.section.body')}</Text>
+        <Button title={t('obd.open')} kind="secondary" onPress={() => navigation.navigate('Obd')} />
+      </Card>
     </ScrollView>
   );
 }

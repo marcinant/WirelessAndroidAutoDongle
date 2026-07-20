@@ -20,6 +20,7 @@ import DevicesScreen from './src/screens/DevicesScreen';
 import DashboardScreen from './src/screens/DashboardScreen';
 import ConfigScreen from './src/screens/ConfigScreen';
 import LogsScreen from './src/screens/LogsScreen';
+import ObdScreen from './src/screens/ObdScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -75,6 +76,7 @@ function App(): React.JSX.Element {
             />
             <Stack.Screen name="Config" component={ConfigScreen} options={{ title: t('title.settings') }} />
             <Stack.Screen name="Logs" component={LogsScreen} options={{ title: t('title.log') }} />
+            <Stack.Screen name="Obd" component={ObdScreen} options={{ title: t('title.obd') }} />
           </Stack.Navigator>
         </NavigationContainer>
       )}

@@ -6,4 +6,5 @@ export type RootStackParamList = {
   Dashboard: { dongle: SavedDongle };
   Config: { dongle: SavedDongle };
   Logs: { dongle: SavedDongle };
+  Obd: undefined;
 };
