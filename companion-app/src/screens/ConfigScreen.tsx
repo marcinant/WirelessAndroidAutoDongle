@@ -12,10 +12,14 @@ import {
   getHa,
   saveHa,
   testHa,
+  getStaStatus,
+  setStaConfig,
+  setStaEnabled,
   reboot,
   setWebuiPassword,
 } from '../api/client';
 import { getConf, setConfMany } from '../api/aawgConf';
+import { usePolling } from '../hooks/usePolling';
 import { t } from '../i18n';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Config'>;
@@ -38,6 +42,26 @@ export default function ConfigScreen({ route }: Props) {
   const [ha, setHa] = React.useState({ url: '', token: '', entity: '' });
   const [haMsg, setHaMsg] = React.useState('');
   const [haBusy, setHaBusy] = React.useState<'save' | 'test' | null>(null);
+
+  // Car wifi (STA) uplink: credentials are write-only (the dongle never
+  // sends the saved password back), live state comes from polling.
+  const staStatus = usePolling(getStaStatus, 4000);
+  const staSsidLoaded = React.useRef(false);
+  const [sta, setSta] = React.useState({ ssid: '', password: '' });
+  const [staMsg, setStaMsg] = React.useState('');
+  const [staBusy, setStaBusy] = React.useState<'save' | 'toggle' | null>(null);
+
+  React.useEffect(() => {
+    // Only ever hydrate once, and only while the fields are still pristine
+    // (untouched by the user) - if the first poll resolves late, after the
+    // user has already started typing a new SSID/password, it must not
+    // clobber their in-progress input. Subsequent polls never touch these
+    // fields at all (staSsidLoaded latches on the first successful load).
+    if (!staSsidLoaded.current && staStatus.data) {
+      staSsidLoaded.current = true;
+      setSta(s => (s.ssid === '' && s.password === '' ? { ...s, ssid: staStatus.data!.ssid } : s));
+    }
+  }, [staStatus.data]);
 
   // Local edits over the raw conf, keyed by AAWG_ variable.
   const [strategy, setStrategy] = React.useState('1');
@@ -127,6 +151,58 @@ export default function ConfigScreen({ route }: Props) {
     }
   }
 
+  async function onStaSave() {
+    setStaBusy('save');
+    setStaMsg(t('cfg.saving'));
+    try {
+      const r = await setStaConfig(sta);
+      setStaMsg(r.ok ? (r.note ?? t('cfg.sta.saved')) : `error: ${r.error}`);
+      staStatus.refresh();
+    } catch (e: any) {
+      setStaMsg(`error: ${String(e?.message ?? e)}`);
+    } finally {
+      setStaBusy(null);
+    }
+  }
+
+  async function onStaToggle(next: boolean) {
+    setStaBusy('toggle');
+    try {
+      const r = await setStaEnabled(next);
+      if (!r.ok) setStaMsg(`error: ${r.error}`);
+      staStatus.refresh();
+    } catch (e: any) {
+      setStaMsg(`error: ${String(e?.message ?? e)}`);
+    } finally {
+      setStaBusy(null);
+    }
+  }
+
+  // "unsupported" (hardware/firmware rejected concurrent AP+STA) must never
+  // be shown as a plain "disconnected"/blank state - it gets its own copy.
+  function staStateText(): string {
+    if (staStatus.error || !staStatus.data) return t('cfg.sta.unreachable');
+    const s = staStatus.data;
+    switch (s.state) {
+      case 'unconfigured':
+        return t('cfg.sta.state.unconfigured');
+      case 'disabled':
+        return t('cfg.sta.state.disabled');
+      case 'unsupported':
+        return t('cfg.sta.state.unsupported');
+      case 'starting':
+        return t('cfg.sta.state.starting');
+      case 'scanning':
+        return t('cfg.sta.state.scanning', { ssid: s.ssid });
+      case 'error':
+        return s.reason === 'auth_failed' ? t('cfg.sta.state.error.auth_failed') : t('cfg.sta.state.error');
+      case 'connected':
+        return t('cfg.sta.state.connected', { ssid: s.ssid, ip: s.ip });
+      default:
+        return s.state;
+    }
+  }
+
   function confirmReboot() {
     Alert.alert(t('cfg.reboot.title'), t('cfg.reboot.body'), [
       { text: t('cfg.cancel'), style: 'cancel' },
@@ -157,6 +233,25 @@ export default function ConfigScreen({ route }: Props) {
           <Button title={t('cfg.ha.test')} kind="secondary" onPress={onHaTest} loading={haBusy === 'test'} />
         </View>
         {!!haMsg && <Text style={styles.msg}>{haMsg}</Text>}
+      </Card>
+
+      <SectionTitle>{t('cfg.sta.title')}</SectionTitle>
+      <Card>
+        <Text style={styles.help}>{t('cfg.sta.help')}</Text>
+        <Field label={t('cfg.sta.ssid')} value={sta.ssid} onChangeText={v => setSta({ ...sta, ssid: v })} placeholder="e.g. MyCar" />
+        <Field label={t('cfg.sta.password')} value={sta.password} onChangeText={v => setSta({ ...sta, password: v })} secure placeholder="••••••••" />
+        <Toggle
+          label={t('cfg.sta.enable')}
+          hint={t('cfg.sta.enable.hint')}
+          value={!!staStatus.data?.enabled}
+          onChange={onStaToggle}
+          disabled={staBusy === 'save'}
+        />
+        <View style={styles.row}>
+          <Button title={t('cfg.sta.save')} onPress={onStaSave} loading={staBusy === 'save'} disabled={staBusy === 'toggle'} />
+        </View>
+        <Text style={styles.msg}>{staStateText()}</Text>
+        {!!staMsg && <Text style={styles.msg}>{staMsg}</Text>}
       </Card>
 
       <SectionTitle>{t('cfg.conn.title')}</SectionTitle>
@@ -208,14 +303,20 @@ function Toggle({
   hint,
   value,
   onChange,
+  disabled,
 }: {
   label: string;
   hint: string;
   value: boolean;
   onChange: (v: boolean) => void;
+  disabled?: boolean;
 }) {
   return (
-    <TouchableOpacity style={styles.toggle} onPress={() => onChange(!value)} activeOpacity={0.7}>
+    <TouchableOpacity
+      style={[styles.toggle, disabled && styles.toggleDisabled]}
+      onPress={() => !disabled && onChange(!value)}
+      disabled={disabled}
+      activeOpacity={0.7}>
       <View style={styles.toggleText}>
         <Text style={styles.toggleLabel}>{label}</Text>
         <Text style={styles.toggleHint}>{hint}</Text>
@@ -242,6 +343,7 @@ const styles = StyleSheet.create({
   segText: { color: colors.textMid, fontSize: 13 },
   segTextOn: { color: colors.accentText, fontWeight: '600' },
   toggle: { flexDirection: 'row', alignItems: 'center', paddingVertical: space.sm },
+  toggleDisabled: { opacity: 0.5 },
   toggleText: { flex: 1, paddingRight: space.md },
   toggleLabel: { color: colors.text, fontSize: 15 },
   toggleHint: { color: colors.textDim, fontSize: 12, marginTop: 2 },

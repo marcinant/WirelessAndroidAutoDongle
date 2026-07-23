@@ -1,0 +1,221 @@
+#!/bin/sh
+#
+# Optional WiFi STA uplink (wlan0_sta) - connects to a second wifi network
+# (e.g. the car's own hotspot) as a client and NATs it to the phone-facing AP
+# interface (wlan0), so the phone gets internet through the dongle even with
+# no cellular data of its own.
+#
+# OFF BY DEFAULT. Entirely independent of the AP: wlan0/hostapd/dnsmasq are
+# never touched here, and any failure in this script (missing multi-vif
+# support, bad credentials, car wifi out of range, ...) must never affect
+# them. Started at boot only if enabled in config; also (re)invoked by
+# sta_set.cgi / sta_enable.cgi for runtime changes without a reboot.
+#
+# NOTE: wlan0_sta is a dynamically created interface (via `iw ... interface
+# add`, below) - it does not exist yet when ifupdown processes
+# /etc/network/interfaces at boot, so it is deliberately NOT listed there.
+# Its whole lifecycle (create, associate, address, NAT) is managed here.
+#
+
+AP_IFACE="wlan0"
+STA_IFACE="wlan0_sta"
+WPA_CTRL_DIR="/var/run/wpa_supplicant_sta"
+WPA_CONF="/var/run/wpa_supplicant_sta.conf"
+WPA_PID="/var/run/wpa_supplicant_sta.pid"
+WPA_LOG="/var/log/wpa_supplicant_sta.log"
+DHCP_PID="/var/run/udhcpc_sta.pid"
+STATE_FILE="/var/run/wlan_sta.state"
+LOCK_FILE="/var/run/wlan_sta.lock"
+
+prev_state() {
+	[ -f "$STATE_FILE" ] && cat "$STATE_FILE" 2>/dev/null
+}
+
+write_state() {
+	OLD=$(prev_state)
+	echo "$1" > "$STATE_FILE"
+	# Only log a transition once, so repeated retries/CGI restarts while
+	# stuck in the same state don't spam /var/log/messages.
+	if [ "$OLD" != "$1" ]; then
+		echo "wlan_sta: state -> $1"
+	fi
+}
+
+teardown() {
+	start-stop-daemon -K -q -p "$DHCP_PID" 2>/dev/null
+	rm -f "$DHCP_PID"
+	start-stop-daemon -K -q -p "$WPA_PID" 2>/dev/null
+	rm -f "$WPA_PID"
+	iptables -t nat -D POSTROUTING -o "$STA_IFACE" -j MASQUERADE 2>/dev/null
+	iptables -D FORWARD -i "$AP_IFACE" -o "$STA_IFACE" -j ACCEPT 2>/dev/null
+	iptables -D FORWARD -i "$STA_IFACE" -o "$AP_IFACE" -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null
+	if ip link show "$STA_IFACE" >/dev/null 2>&1; then
+		iw dev "$STA_IFACE" del 2>/dev/null
+	fi
+	rm -rf "$WPA_CONF" "$WPA_CTRL_DIR"
+}
+
+start() {
+	# /etc/aawgd.conf is sourced once at boot by rcS_aawgd_conf, which sets
+	# and exports AAWG_CONF_SOURCED=1. busybox httpd (and everything it
+	# forks, including sta_set.cgi/sta_enable.cgi and the "S49wlan_sta
+	# restart"/"start" they invoke) inherits that. If we honored the
+	# inherited flag here we'd skip re-sourcing and act on stale boot-time
+	# config, so newly-saved SSID/password/enable settings would never take
+	# effect without a reboot - always re-source fresh for our own purposes.
+	echo "Source /etc/aawgd.conf"
+	source /etc/aawgd.conf
+
+	exec 9>"$LOCK_FILE"
+	if ! flock -n 9; then
+		echo "wlan_sta: another start/stop/restart is already in progress, skipping"
+		exit 0
+	fi
+
+	if [ "${AAWG_STA_ENABLE:-0}" != "1" ]; then
+		echo "wlan_sta: AAWG_STA_ENABLE is not 1, skipping"
+		write_state "disabled"
+		exit 0
+	fi
+
+	if [ -z "${AAWG_STA_SSID:-}" ]; then
+		echo "wlan_sta: enabled but no AAWG_STA_SSID set, skipping"
+		write_state "unconfigured"
+		exit 0
+	fi
+
+	# In case of a previous unclean stop, make sure we start from a clean slate.
+	teardown
+
+	# Belt-and-braces on top of the teardown call above: a leftover
+	# wlan0_sta from a previous run whose `iw dev del` failed or was
+	# skipped must not make the `interface add` below fail for the
+	# unrelated reason of "interface already exists" and get misreported
+	# as "hardware doesn't support concurrent AP+STA".
+	if ip link show "$STA_IFACE" >/dev/null 2>&1; then
+		iw dev "$STA_IFACE" del 2>/dev/null
+	fi
+
+	# Second virtual interface on the same radio as the AP. If the
+	# brcmfmac firmware doesn't support concurrent AP+STA vifs this fails
+	# here - report "unsupported" and stop cleanly. wlan0/hostapd is never
+	# touched, so the AP/AA session is unaffected either way.
+	if ! iw dev "$AP_IFACE" interface add "$STA_IFACE" type station 2>/tmp/wlan_sta.iw_err; then
+		echo "wlan_sta: iw dev $AP_IFACE interface add $STA_IFACE type station failed - concurrent AP+STA not supported on this hardware/firmware"
+		write_state "unsupported"
+		exit 0
+	fi
+
+	ip link set "$STA_IFACE" up 2>/dev/null
+
+	# wpa_supplicant config for the target (car) wifi. Written with a
+	# restrictive umask and never echoed anywhere - the password must not
+	# reach /var/log/messages or any log tailed by logs.cgi.
+	umask 077
+	{
+		echo "ctrl_interface=$WPA_CTRL_DIR"
+		echo "update_config=0"
+		echo ""
+		echo "network={"
+		echo "	ssid=\"${AAWG_STA_SSID}\""
+		if [ -n "${AAWG_STA_PASSWORD:-}" ]; then
+			echo "	psk=\"${AAWG_STA_PASSWORD}\""
+			echo "	key_mgmt=WPA-PSK"
+		else
+			echo "	key_mgmt=NONE"
+		fi
+		echo "}"
+	} > "$WPA_CONF"
+
+	# Dedicated log file just for this interface's wpa_supplicant, so the
+	# auth-failure grep in sta_status.cgi has somewhere to actually find
+	# WRONG_KEY/handshake-failed lines, and isn't scanning the shared
+	# system log (which nothing here would write to anyway).
+	: > "$WPA_LOG" 2>/dev/null
+	printf "wlan_sta: starting wpa_supplicant on %s: " "$STA_IFACE"
+	start-stop-daemon -S -b -q -m -p "$WPA_PID" -x /usr/sbin/wpa_supplicant \
+		-- -B -i "$STA_IFACE" -c "$WPA_CONF" -D nl80211 -f "$WPA_LOG"
+	if [ $? -ne 0 ]; then
+		echo "FAIL"
+		write_state "error"
+		exit 0
+	fi
+	echo "OK"
+
+	# DHCP client for wlan0_sta - association alone doesn't get us an IP.
+	# Keeps retrying forever (-t 0) in the background; never blocks boot.
+	if command -v udhcpc >/dev/null 2>&1; then
+		start-stop-daemon -S -b -q -m -p "$DHCP_PID" -x /sbin/udhcpc \
+			-- -i "$STA_IFACE" -p "$DHCP_PID" -t 0 -A 5 -b -q 2>/dev/null
+	else
+		echo "wlan_sta: udhcpc not available, wlan0_sta will not get an address"
+	fi
+
+	# NAT the uplink to the phone-facing AP interface. Idempotent (-C check
+	# before -A) so start can be called again without duplicating rules.
+	# Each step's *final* state is verified with -C - if the netfilter/nat
+	# kernel modules are missing (or ip_forward can't be written), no
+	# traffic would actually be forwarded, so this must not silently fall
+	# through to "starting"/"connected".
+	if ! echo 1 > /proc/sys/net/ipv4/ip_forward 2>/dev/null; then
+		echo "wlan_sta: failed to enable ip_forward"
+		write_state "error"
+		exit 0
+	fi
+
+	iptables -t nat -C POSTROUTING -o "$STA_IFACE" -j MASQUERADE 2>/dev/null || \
+		iptables -t nat -A POSTROUTING -o "$STA_IFACE" -j MASQUERADE
+	if ! iptables -t nat -C POSTROUTING -o "$STA_IFACE" -j MASQUERADE 2>/dev/null; then
+		echo "wlan_sta: failed to add NAT MASQUERADE rule"
+		write_state "error"
+		exit 0
+	fi
+
+	iptables -C FORWARD -i "$AP_IFACE" -o "$STA_IFACE" -j ACCEPT 2>/dev/null || \
+		iptables -A FORWARD -i "$AP_IFACE" -o "$STA_IFACE" -j ACCEPT
+	if ! iptables -C FORWARD -i "$AP_IFACE" -o "$STA_IFACE" -j ACCEPT 2>/dev/null; then
+		echo "wlan_sta: failed to add FORWARD rule ($AP_IFACE -> $STA_IFACE)"
+		write_state "error"
+		exit 0
+	fi
+
+	iptables -C FORWARD -i "$STA_IFACE" -o "$AP_IFACE" -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || \
+		iptables -A FORWARD -i "$STA_IFACE" -o "$AP_IFACE" -m state --state RELATED,ESTABLISHED -j ACCEPT
+	if ! iptables -C FORWARD -i "$STA_IFACE" -o "$AP_IFACE" -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null; then
+		echo "wlan_sta: failed to add FORWARD rule ($STA_IFACE -> $AP_IFACE established)"
+		write_state "error"
+		exit 0
+	fi
+
+	write_state "starting"
+}
+
+stop() {
+	exec 9>"$LOCK_FILE"
+	if ! flock -n 9; then
+		echo "wlan_sta: another start/stop/restart is already in progress, skipping"
+		exit 0
+	fi
+
+	teardown
+	write_state "disabled"
+}
+
+case "$1" in
+	start)
+		start
+		;;
+	stop)
+		stop
+		;;
+	restart)
+		$0 stop
+		$0 start
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart}"
+		exit 1
+		;;
+esac
+
+exit 0

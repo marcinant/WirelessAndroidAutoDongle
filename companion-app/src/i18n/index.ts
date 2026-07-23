@@ -158,6 +158,28 @@ const STRINGS: Record<string, Entry> = {
   'cfg.reboot.body': { en: 'Reboot now to apply changes?', pl: 'Zrestartować teraz, aby zastosować zmiany?' },
   'cfg.cancel': { en: 'Cancel', pl: 'Anuluj' },
 
+  // STA / car wifi uplink
+  'cfg.sta.title': { en: 'Car wifi uplink', pl: 'Uplink wifi auta' },
+  'cfg.sta.help': {
+    en: "Joins the car's own wifi hotspot to give the phone internet, without the phone ever leaving the dongle's network. Needs hardware support for running AP + client wifi at the same time.",
+    pl: 'Łączy się z wifi auta, aby dać telefonowi internet, bez odłączania telefonu od sieci dongla. Wymaga sprzętowego wsparcia jednoczesnego trybu AP + klient wifi.',
+  },
+  'cfg.sta.ssid': { en: 'Car wifi SSID', pl: 'SSID wifi auta' },
+  'cfg.sta.password': { en: 'Car wifi password', pl: 'Hasło wifi auta' },
+  'cfg.sta.enable': { en: 'Enable uplink', pl: 'Włącz uplink' },
+  'cfg.sta.enable.hint': { en: 'Only takes effect once an SSID is saved.', pl: 'Działa dopiero po zapisaniu SSID.' },
+  'cfg.sta.save': { en: 'Save credentials', pl: 'Zapisz dane' },
+  'cfg.sta.saved': { en: 'saved', pl: 'zapisano' },
+  'cfg.sta.state.unconfigured': { en: 'Not configured', pl: 'Nie skonfigurowano' },
+  'cfg.sta.state.disabled': { en: 'Saved, not enabled', pl: 'Zapisano, nie włączono' },
+  'cfg.sta.state.unsupported': { en: 'Not supported on this hardware', pl: 'Nieobsługiwane na tym sprzęcie' },
+  'cfg.sta.state.starting': { en: 'Starting…', pl: 'Uruchamianie…' },
+  'cfg.sta.state.scanning': { en: 'Looking for {ssid}…', pl: 'Szukanie {ssid}…' },
+  'cfg.sta.state.error.auth_failed': { en: 'Wrong password', pl: 'Błędne hasło' },
+  'cfg.sta.state.error': { en: 'Error', pl: 'Błąd' },
+  'cfg.sta.state.connected': { en: 'Connected to {ssid} ({ip})', pl: 'Połączono z {ssid} ({ip})' },
+  'cfg.sta.unreachable': { en: 'unknown — dongle unreachable', pl: 'nieznany — brak łączności z donglem' },
+
   // OBD / car diagnostics
   'obd.section': { en: 'Car diagnostics', pl: 'Diagnostyka auta' },
   'obd.section.body': { en: 'Read live engine data, fuel use and fault codes from an ELM327 OBD-II adapter.', pl: 'Odczyt danych silnika, spalania i kodów błędów z adaptera ELM327 OBD-II.' },

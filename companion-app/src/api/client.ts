@@ -7,6 +7,8 @@ import {
   ConnectionEvent,
   DongleStatus,
   HaSettings,
+  StaConfig,
+  StaStatus,
   StatsSample,
   StatsSeries,
 } from './types';
@@ -176,6 +178,35 @@ export async function testHa(
     method: 'POST',
     headers: { 'Content-Type': 'text/plain' },
     body,
+  });
+  return r.json();
+}
+
+export async function getStaStatus(): Promise<StaStatus> {
+  const r = await req('/cgi-bin/sta_status.cgi');
+  if (!r.ok) throw new Error(`sta_status ${r.status}`);
+  return (await r.json()) as StaStatus;
+}
+
+export async function setStaConfig(
+  s: StaConfig,
+): Promise<{ ok: boolean; note?: string; error?: string }> {
+  const body = `ssid=${s.ssid}\npassword=${s.password}`;
+  const r = await req('/cgi-bin/sta_set.cgi', {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body,
+  });
+  return r.json();
+}
+
+export async function setStaEnabled(
+  enabled: boolean,
+): Promise<{ ok: boolean; note?: string; error?: string }> {
+  const r = await req('/cgi-bin/sta_enable.cgi', {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: `enabled=${enabled ? '1' : '0'}`,
   });
   return r.json();
 }
