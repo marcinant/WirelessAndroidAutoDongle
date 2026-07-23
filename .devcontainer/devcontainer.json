@@ -1,0 +1,35 @@
+{
+  "name": "WirelessAndroidAutoDongle",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/WirelessAndroidAutoDongle,type=bind",
+  "workspaceFolder": "/workspaces/WirelessAndroidAutoDongle",
+  "remoteUser": "dev",
+  "postCreateCommand": "cd companion-app && npm install && (bundle install || true)",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "ms-vscode.cpptools",
+        "redhat.vscode-yaml"
+      ]
+    }
+  },
+  "remoteEnv": {
+    "ANDROID_HOME": "/opt/android-sdk",
+    "ANDROID_SDK_ROOT": "/opt/android-sdk",
+    "DISPLAY": "${localEnv:DISPLAY}"
+  },
+  // --privileged + full /dev bind: openauto (autoapp) needs raw libusb access
+  // to the dongle's USB-accessory gadget, including hotplug after the
+  // container is already running (dongle plugged in later). Host-side, run
+  // `xhost +local:` once before attaching so the bind-mounted X11 socket
+  // actually accepts connections from the container's Qt window.
+  "runArgs": ["--privileged"],
+  "mounts": [
+    "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind",
+    "source=/dev,target=/dev,type=bind"
+  ]
+}
